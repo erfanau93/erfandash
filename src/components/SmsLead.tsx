@@ -234,7 +234,6 @@ export default function SmsLead({ leadId, leadName, phoneNumber, dialpadToken, d
         throw new Error(errorDetail)
       }
 
-      const sentAt = new Date().toISOString()
       const sentAtMs = Date.now()
       const { data: updated, error: updateError } = await supabase
         .from('extracted_leads')

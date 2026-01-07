@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase, type DialpadEmail } from '../lib/supabase'
-import { format, startOfDay, endOfDay, addDays, isSameDay } from 'date-fns'
+import { startOfDay, endOfDay, addDays, isSameDay } from 'date-fns'
 
 interface ExtractedLead {
   id?: string

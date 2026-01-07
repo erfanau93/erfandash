@@ -13,6 +13,8 @@ interface ExtractedLead {
   extracted_at?: string
   status?: string | null
   first_contact?: string | number | null
+  last_text_date?: string | null
+  last_text_body?: string | null
 }
 
 interface LeadEmail extends DialpadEmail {

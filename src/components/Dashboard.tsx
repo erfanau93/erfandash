@@ -5,12 +5,15 @@ import DayComparisonChart from './DayComparisonChart'
 import HourlyActivity from './HourlyActivity'
 import CommunicationsLog from './CommunicationsLog'
 import Lead from './Lead'
+import SmsLead from './SmsLead'
 import { subDays } from 'date-fns'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://etiaoqskgplpfydblzne.supabase.co'
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV0aWFvcXNrZ3BscGZ5ZGJsem5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcyMzI0NzAsImV4cCI6MjA4MjgwODQ3MH0.c-AlsveEx_bxVgEivga3PRrBp5ylY3He9EJXbaa2N2c'
-const dialpadUrl = 'https://dialpad.com/api/v2/users/6452247499866112/initiate_call'
-const dialpadToken = 'eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjItMTEtMjEiLCJ0eXAiOiJhdCtqd3QifQ.eyJzdWIiOiJjb21wYW55OjU5NjA4NzYzOTEzNjY2NTYiLCJhdWQiOlsicHVibGljIl0sImp0aSI6ImVmYzhlYTI3LWRiZWItNDczMy1iMWVkLWQ2M2FjMDg2NWMxOCIsImNsaWVudF9pZCI6IkZVcjhYWkVWZFBnOUVZSkpoenp4cW5EZHkiLCJzY29wZSI6ImNvbmZlcmVuY2U6cmVhZCBjb25mZXJlbmNlOmFsbCBzY3JlZW5fcG9wIGNoYW5nZV9sb2cgZmF4X21lc3NhZ2UgY2FsbHM6bGlzdCIsImV4cCI6MTc2Nzc3NzcwMiwicnRfZW5jIjpudWxsLCJ0aWVyIjowLCJpc3MiOiJodHRwczovL2RpYWxwYWQuY29tIiwiaWF0IjoxNzY3Nzc0MTAyfQ.x-JsmiqhTeR4MGjoNYmFW4K4HdjSOcJjRchGAolnwOXSdNOEFe-L-fLKAvDeWNwJKEFjyiZxcumqg3XdUcFFNQ'
+const dialpadUserId = '6452247499866112'
+const dialpadUrl = `https://dialpad.com/api/v2/users/${dialpadUserId}/initiate_call`
+const dialpadToken =
+  'NNRYnLXqJgkWXePcCG2SGCVzHfuB6kxAqQATPvnmn3x6k5RevHUCPdF8zF8jqXsssuyG67bEALxZH9TACsq4aARA46VL4yZ246Kf'
 
 interface Metrics {
   uniqueCalls: number
@@ -40,6 +43,8 @@ interface ExtractedLead {
   status?: string | null
   first_contact?: string | number | null
   lead_to_call_minutes?: number | null
+  last_text_date?: string | number | null
+  last_text_body?: string | null
 }
 
 const LEAD_STATUS_OPTIONS = ['Unanswered', 'Quote Sent', 'Job Won', 'Not interested', 'Follow Up']
@@ -136,6 +141,16 @@ function getFirstContactDate(lead: ExtractedLead): Date | null {
     return Number.isNaN(d.getTime()) ? null : d
   }
   const d = new Date(lead.first_contact)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+function getLastTextDate(lead: ExtractedLead): Date | null {
+  if (!lead.last_text_date) return null
+  if (typeof lead.last_text_date === 'number') {
+    const d = new Date(lead.last_text_date)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+  const d = new Date(lead.last_text_date)
   return Number.isNaN(d.getTime()) ? null : d
 }
 
@@ -372,7 +387,7 @@ export default function Dashboard() {
             .select('*')
             .in('email_id', leadEmailIds)
             .order('extracted_at', { ascending: false })
-            .limit(10)
+            .limit(50)
 
           if (extractedLeadsError) {
             console.error('Error fetching extracted leads:', extractedLeadsError)
@@ -1071,7 +1086,7 @@ export default function Dashboard() {
                     <div
                       key={lead.id}
                       className={`p-3 rounded-lg shadow-sm flex flex-col gap-2 border ${statusStyle.border} ${statusStyle.bg} ${
-                        newLead ? 'ring-2 ring-amber-400/60 shadow-amber-500/20 animate-pulse' : ''
+                        newLead ? 'new-lead-border' : ''
                       }`}
                     >
                       <div className="flex items-start justify-between gap-3">
@@ -1098,6 +1113,24 @@ export default function Dashboard() {
                             <div>
                               <span className="text-[var(--color-text-muted)] uppercase tracking-wider text-[10px]">Region/Notes</span>
                               <p className="text-white text-sm mt-0.5">{lead.region_notes}</p>
+                            </div>
+                          )}
+                          {(lead.last_text_date || lead.last_text_body) && (
+                            <div>
+                              <span className="text-[var(--color-text-muted)] uppercase tracking-wider text-[10px]">Last Text</span>
+                              {getLastTextDate(lead) && (
+                                <p className="text-white font-medium mt-0.5">
+                                  {getLastTextDate(lead)?.toLocaleString()}
+                                </p>
+                              )}
+                              {lead.last_text_body && (
+                                <p
+                                  className="text-[var(--color-text-muted)] text-xs mt-0.5 truncate"
+                                  title={lead.last_text_body}
+                                >
+                                  “{lead.last_text_body}”
+                                </p>
+                              )}
                             </div>
                           )}
                           <div className="text-[var(--color-text-muted)] text-[10px] pt-1 border-t border-white/5 mt-1">
@@ -1150,6 +1183,20 @@ export default function Dashboard() {
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                           </svg>
                         )}
+                        <SmsLead
+                          leadId={lead.id}
+                          leadName={lead.name}
+                          phoneNumber={lead.phone_number}
+                          dialpadToken={dialpadToken}
+                          dialpadUserId={dialpadUserId}
+                          onSent={({ sentAt, message }) => {
+                            setExtractedLeads((prev) =>
+                              prev.map((l) =>
+                                l.id === lead.id ? { ...l, last_text_date: sentAt, last_text_body: message } : l
+                              )
+                            )
+                          }}
+                        />
                         <button
                           onClick={() => handleCallLead(lead.id, lead.phone_number)}
                           disabled={callingLeadId === lead.id}

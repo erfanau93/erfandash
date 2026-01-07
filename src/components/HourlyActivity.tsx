@@ -70,38 +70,80 @@ export default function HourlyActivity({ calls, selectedDate, isLoading }: Props
         <span className="text-[10px] text-gray-400 uppercase tracking-wider">7AM - 7PM</span>
       </div>
       
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {hourlyData.map(({ hour, count, intensity }) => {
-          const hourLabel = `${hour.toString().padStart(2, '0')}:00`
-          const widthPercent = intensity * 100
-          const height = Math.max(4, intensity * 20) // more compact height
-          
-          let bgColor = 'bg-slate-700'
-          if (intensity > 0.7) bgColor = 'bg-emerald-500'
-          else if (intensity > 0.4) bgColor = 'bg-cyan-500'
-          else if (intensity > 0.1) bgColor = 'bg-blue-500'
-          
-          return (
-            <div key={hour} className="flex items-center gap-2">
-              <div className="w-14 text-[11px] text-gray-400 font-mono">{hourLabel}</div>
-              <div className="flex-1 relative">
-                <div 
-                  className={`${bgColor} rounded-full transition-all duration-300`}
-                  style={{ 
-                    width: `${widthPercent}%`,
-                    height: `${height}px`,
-                    minWidth: count > 0 ? '6px' : '0px',
-                  }}
-                />
-                {count > 0 && (
-                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-white font-medium">
-                    {count}
-                  </span>
-                )}
-              </div>
-            </div>
-          )
-        })}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <div className="text-[11px] text-gray-400 uppercase tracking-wider mb-1">7 AM - 12 PM</div>
+          {hourlyData
+            .filter(({ hour }) => hour < 12)
+            .map(({ hour, count, intensity }) => {
+              const hourLabel = `${hour.toString().padStart(2, '0')}:00`
+              const widthPercent = intensity * 100
+              const height = Math.max(4, intensity * 20)
+
+              let bgColor = 'bg-slate-700'
+              if (intensity > 0.7) bgColor = 'bg-emerald-500'
+              else if (intensity > 0.4) bgColor = 'bg-cyan-500'
+              else if (intensity > 0.1) bgColor = 'bg-blue-500'
+
+              return (
+                <div key={hour} className="flex items-center gap-2">
+                  <div className="w-14 text-[11px] text-gray-400 font-mono">{hourLabel}</div>
+                  <div className="flex-1 relative">
+                    <div
+                      className={`${bgColor} rounded-full transition-all duration-300`}
+                      style={{
+                        width: `${widthPercent}%`,
+                        height: `${height}px`,
+                        minWidth: count > 0 ? '6px' : '0px',
+                      }}
+                    />
+                    {count > 0 && (
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-white font-medium">
+                        {count}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+        </div>
+
+        <div className="space-y-1.5">
+          <div className="text-[11px] text-gray-400 uppercase tracking-wider mb-1">12 PM - 7 PM</div>
+          {hourlyData
+            .filter(({ hour }) => hour >= 12)
+            .map(({ hour, count, intensity }) => {
+              const hourLabel = `${hour.toString().padStart(2, '0')}:00`
+              const widthPercent = intensity * 100
+              const height = Math.max(4, intensity * 20)
+
+              let bgColor = 'bg-slate-700'
+              if (intensity > 0.7) bgColor = 'bg-emerald-500'
+              else if (intensity > 0.4) bgColor = 'bg-cyan-500'
+              else if (intensity > 0.1) bgColor = 'bg-blue-500'
+
+              return (
+                <div key={hour} className="flex items-center gap-2">
+                  <div className="w-14 text-[11px] text-gray-400 font-mono">{hourLabel}</div>
+                  <div className="flex-1 relative">
+                    <div
+                      className={`${bgColor} rounded-full transition-all duration-300`}
+                      style={{
+                        width: `${widthPercent}%`,
+                        height: `${height}px`,
+                        minWidth: count > 0 ? '6px' : '0px',
+                      }}
+                    />
+                    {count > 0 && (
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-white font-medium">
+                        {count}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+        </div>
       </div>
       
       {maxCount === 0 && (

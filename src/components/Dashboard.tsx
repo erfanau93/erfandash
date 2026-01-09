@@ -10,13 +10,6 @@ import SmsLead from './SmsLead'
 import BookingModal from './BookingModal'
 import { subDays } from 'date-fns'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://etiaoqskgplpfydblzne.supabase.co'
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV0aWFvcXNrZ3BscGZ5ZGJsem5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcyMzI0NzAsImV4cCI6MjA4MjgwODQ3MH0.c-AlsveEx_bxVgEivga3PRrBp5ylY3He9EJXbaa2N2c'
-const dialpadUserId = '6452247499866112'
-const dialpadUrl = `https://dialpad.com/api/v2/users/${dialpadUserId}/initiate_call`
-const dialpadToken =
-  'NNRYnLXqJgkWXePcCG2SGCVzHfuB6kxAqQATPvnmn3x6k5RevHUCPdF8zF8jqXsssuyG67bEALxZH9TACsq4aARA46VL4yZ246Kf'
-
 interface Metrics {
   uniqueCalls: number
   outboundCalls: number
@@ -674,23 +667,9 @@ export default function Dashboard() {
   const handleSyncEmails = async () => {
     try {
       setIsLoading(true)
-      const response = await fetch(
-        'https://etiaoqskgplpfydblzne.supabase.co/functions/v1/outlook-email-sync',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        }
-      )
-      
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.details || 'Failed to sync emails')
-      }
-      
-      const result = await response.json()
-      console.log('Email sync result:', result)
+      const { data, error } = await supabase.functions.invoke('outlook-email-sync', { body: {} })
+      if (error) throw error
+      console.log('Email sync result:', data)
       
       // Refresh metrics after sync
       setTimeout(() => {
@@ -718,21 +697,10 @@ export default function Dashboard() {
       setLeadStatusError(null)
       setSavingStatusId(leadId)
 
-      const response = await fetch(`${supabaseUrl}/functions/v1/update-lead-status`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: supabaseAnonKey,
-          Authorization: `Bearer ${supabaseAnonKey}`,
-        },
-        body: JSON.stringify({ leadId, status }),
+      const { error } = await supabase.functions.invoke('update-lead-status', {
+        body: { leadId, status },
       })
-
-      const result = await response.json()
-      if (!response.ok || result?.error) {
-        const details = result?.error || 'Failed to update lead status'
-        throw new Error(details)
-      }
+      if (error) throw new Error(error.message || 'Failed to update lead status')
 
       setExtractedLeads((prev) => prev.map((lead) => (lead.id === leadId ? { ...lead, status } : lead)))
     } catch (err) {
@@ -777,21 +745,10 @@ export default function Dashboard() {
     setLeadCallError(null)
     setCallingLeadId(leadId)
     try {
-      const response = await fetch(dialpadUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          accept: 'application/json',
-          authorization: `Bearer ${dialpadToken}`,
-        },
-        body: JSON.stringify({ phone_number: phoneNumber }),
+      const { error } = await supabase.functions.invoke('dialpad-initiate-call', {
+        body: { phone_number: phoneNumber },
       })
-
-      const result = await response.json().catch(() => ({}))
-      if (!response.ok || result?.error) {
-        const details = result?.error || 'Failed to initiate call'
-        throw new Error(details)
-      }
+      if (error) throw new Error(error.message || 'Failed to initiate call')
 
       // Record the first contact time the first time "Call Lead" is pressed
       if (!hasFirstContact) {
@@ -1685,8 +1642,6 @@ export default function Dashboard() {
                           leadId={lead.id}
                           leadName={lead.name}
                           phoneNumber={lead.phone_number}
-                          dialpadToken={dialpadToken}
-                          dialpadUserId={dialpadUserId}
                           onSent={({ sentAt, message }) => {
                             setExtractedLeads((prev) =>
                               prev.map((l) =>

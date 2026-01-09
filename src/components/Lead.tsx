@@ -84,18 +84,13 @@ function LeadModal({ email, onClose, onExtracted }: LeadModalProps) {
     setExtractionError(null)
 
     try {
-      const response = await fetch(
-        'https://etiaoqskgplpfydblzne.supabase.co/functions/v1/extract-lead-info',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email_id: email.id }),
-        }
-      )
+      const { data, error } = await supabase.functions.invoke('extract-lead-info', {
+        body: { email_id: email.id },
+      })
+      if (error) throw error
 
-      const data = await response.json()
-
-      if (data.success) {
+      const payload: any = data || {}
+      if (payload.success) {
         // Fetch the freshly stored row so we keep the lead id for quote linking
         try {
           const { data: persisted, error: persistedError } = await supabase
@@ -111,22 +106,22 @@ function LeadModal({ email, onClose, onExtracted }: LeadModalProps) {
           setExtractedLead(
             persisted || {
               email_id: email.id,
-              name: data.name,
-              phone_number: data.phone_number,
-              email: data.email,
-              region_notes: data.region_notes,
-              extracted_at: data.extracted_at,
+              name: payload.name,
+              phone_number: payload.phone_number,
+              email: payload.email,
+              region_notes: payload.region_notes,
+              extracted_at: payload.extracted_at,
             }
           )
         } catch (fetchErr) {
           console.warn('Lead extracted but persisted row lookup failed', fetchErr)
           setExtractedLead({
             email_id: email.id,
-            name: data.name,
-            phone_number: data.phone_number,
-            email: data.email,
-            region_notes: data.region_notes,
-            extracted_at: data.extracted_at,
+            name: payload.name,
+            phone_number: payload.phone_number,
+            email: payload.email,
+            region_notes: payload.region_notes,
+            extracted_at: payload.extracted_at,
           })
         }
         // Notify parent to refresh leads list
@@ -134,7 +129,7 @@ function LeadModal({ email, onClose, onExtracted }: LeadModalProps) {
           onExtracted()
         }
       } else {
-        setExtractionError(data.error || 'Failed to extract lead information')
+        setExtractionError(payload.error || 'Failed to extract lead information')
       }
     } catch (error) {
       console.error('Error extracting lead:', error)

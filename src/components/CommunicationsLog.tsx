@@ -446,33 +446,28 @@ export default function CommunicationsLog() {
 
     setIsFetchingSummary(true)
     try {
-      const response = await fetch(
-        'https://etiaoqskgplpfydblzne.supabase.co/functions/v1/get-transcript-summary',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ call_id: selectedItem.call_id }),
-        }
-      )
+      const { data, error } = await supabase.functions.invoke('get-transcript-summary', {
+        body: { call_id: selectedItem.call_id },
+      })
+      if (error) throw error
 
-      const data = await response.json()
-
-      if (data.success && (data.transcript || data.summary)) {
+      const payload: any = data || {}
+      if (payload.success && (payload.transcript || payload.summary)) {
         // Update the selected item with the new data
         setSelectedItem(prev => prev ? {
           ...prev,
-          transcript: data.transcript || prev.transcript,
-          summary: data.summary || prev.summary,
+          transcript: payload.transcript || prev.transcript,
+          summary: payload.summary || prev.summary,
         } : null)
 
         // Also update the items list
         setItems(prev => prev.map(item => 
           item.id === selectedItem.id 
-            ? { ...item, transcript: data.transcript || item.transcript, summary: data.summary || item.summary }
+            ? { ...item, transcript: payload.transcript || item.transcript, summary: payload.summary || item.summary }
             : item
         ))
-      } else if (data.message) {
-        alert(data.message)
+      } else if (payload.message) {
+        alert(payload.message)
       }
     } catch (error) {
       console.error('Error fetching summary:', error)

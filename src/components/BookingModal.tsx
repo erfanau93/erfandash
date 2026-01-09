@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://etiaoqskgplpfydblzne.supabase.co'
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV0aWFvcXNrZ3BscGZ5ZGJsem5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcyMzI0NzAsImV4cCI6MjA4MjgwODQ3MH0.c-AlsveEx_bxVgEivga3PRrBp5ylY3He9EJXbaa2N2c'
+import { supabase } from '../lib/supabase'
 
 type RepeatType = 'none' | 'weekly' | 'fortnightly' | '3-weekly' | 'monthly' | '2-monthly'
 
@@ -103,21 +101,13 @@ export default function BookingModal({ lead, onClose, onSuccess, onSkip }: Booki
         }
       }
 
-      const response = await fetch(`${supabaseUrl}/functions/v1/create-booking-series`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: supabaseAnonKey,
-          Authorization: `Bearer ${supabaseAnonKey}`,
-        },
-        body: JSON.stringify(payload),
+      const { data, error: fnError } = await supabase.functions.invoke('create-booking-series', {
+        body: payload,
       })
-
-      const result = await response.json()
-
-      if (!response.ok || result.error) {
-        throw new Error(result.error || 'Failed to create booking')
+      if (fnError) {
+        throw new Error(fnError.message || 'Failed to create booking')
       }
+      const result: any = data || {}
 
       onSuccess?.(result.series?.id)
       onClose()

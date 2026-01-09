@@ -37,12 +37,7 @@ const MAPBOX_TOKEN =
   import.meta.env.VITE_MAPBOX ||
   ''
 
-// NOTE: This uses Dialpad directly from the browser (same approach as other parts of this app).
-// If CORS blocks it, we can switch to an Edge Function proxy.
-const DIALPAD_SMS_ENDPOINT = 'https://dialpad.com/api/v2/sms'
-const dialpadUserId = '6452247499866112'
-const dialpadToken =
-  'NNRYnLXqJgkWXePcCG2SGCVzHfuB6kxAqQATPvnmn3x6k5RevHUCPdF8zF8jqXsssuyG67bEALxZH9TACsq4aARA46VL4yZ246Kf'
+// Dialpad actions are routed through a Supabase Edge Function so no API keys hit the browser.
 
 function toYmd(d: Date) {
   const yyyy = d.getFullYear()
@@ -343,36 +338,11 @@ export default function Dispatch() {
     setSmsSending(true)
     try {
       for (const c of recipients) {
-        const payload = {
-          infer_country_code: false,
-          to_numbers: [c.phone],
-          user_id: dialpadUserId,
-          text: bulkMessage.trim(),
-        }
-        const response = await fetch(DIALPAD_SMS_ENDPOINT, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            accept: 'application/json',
-            authorization: `Bearer ${dialpadToken}`,
-          },
-          body: JSON.stringify(payload),
+        const { error: fnError } = await supabase.functions.invoke('dialpad-send-sms', {
+          body: { to_numbers: [c.phone], text: bulkMessage.trim() },
         })
-        const textBody = await response.text()
-        let parsed: any = null
-        try {
-          parsed = textBody ? JSON.parse(textBody) : null
-        } catch {
-          parsed = null
-        }
-        if (!response.ok || parsed?.error) {
-          const details =
-            typeof parsed?.error === 'string'
-              ? parsed.error
-              : parsed?.error
-              ? JSON.stringify(parsed.error)
-              : textBody || `Failed to send SMS (status ${response.status})`
-          throw new Error(`Dialpad error for ${c.full_name}: ${details}`)
+        if (fnError) {
+          throw new Error(`SMS failed for ${c.full_name}: ${fnError.message || 'Dialpad error'}`)
         }
       }
       setInfo(`Sent SMS to ${recipients.length} cleaner(s).`)

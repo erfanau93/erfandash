@@ -13,9 +13,6 @@ type Cleaner = {
   base_lat: number | null
   base_lng: number | null
   abn: string | null
-  bank_account_name: string | null
-  bank_bsb: string | null
-  bank_account_number: string | null
   rates: Record<string, number> | null
   min_booking_minutes: number | null
   notice_hours: number | null
@@ -80,9 +77,6 @@ export default function Cleaners() {
     base_lat: null as number | null,
     base_lng: null as number | null,
     abn: '',
-    bank_account_name: '',
-    bank_bsb: '',
-    bank_account_number: '',
     min_booking_minutes: 120,
     notice_hours: 24,
     cancellation_policy: '',
@@ -98,6 +92,15 @@ export default function Cleaners() {
     active: true,
   }))
 
+  // Bank details are stored encrypted at rest (via Edge Functions) and never pulled from the DB directly.
+  const [bankForm, setBankForm] = useState(() => ({
+    bank_account_name: '',
+    bank_bsb: '',
+    bank_account_number: '',
+  }))
+  const [bankLoading, setBankLoading] = useState(false)
+  const [bankError, setBankError] = useState<string | null>(null)
+
   const [locationResults, setLocationResults] = useState<{ place_name: string; center?: [number, number] }[]>([])
 
   const fetchCleaners = useCallback(async () => {
@@ -106,7 +109,33 @@ export default function Cleaners() {
     try {
       const { data, error: err } = await supabase
         .from('cleaners')
-        .select('*')
+        .select(
+          [
+            'id',
+            'full_name',
+            'phone',
+            'email',
+            'base_location_text',
+            'base_lat',
+            'base_lng',
+            'abn',
+            'rates',
+            'min_booking_minutes',
+            'notice_hours',
+            'cancellation_policy',
+            'has_transport',
+            'transport_type',
+            'max_travel_km',
+            'can_transport_equipment',
+            'public_liability_policy_number',
+            'public_liability_expiry',
+            'team_size',
+            'availability',
+            'active',
+            'created_at',
+            'updated_at',
+          ].join(',')
+        )
         .order('created_at', { ascending: false })
         .limit(500)
       if (err) throw err
@@ -132,9 +161,6 @@ export default function Cleaners() {
       base_lat: null,
       base_lng: null,
       abn: '',
-      bank_account_name: '',
-      bank_bsb: '',
-      bank_account_number: '',
       min_booking_minutes: 120,
       notice_hours: 24,
       cancellation_policy: '',
@@ -149,6 +175,8 @@ export default function Cleaners() {
       availability: defaultAvailability(),
       active: true,
     })
+    setBankForm({ bank_account_name: '', bank_bsb: '', bank_account_number: '' })
+    setBankError(null)
     setLocationResults([])
   }
 
@@ -162,9 +190,6 @@ export default function Cleaners() {
       base_lat: c.base_lat ?? null,
       base_lng: c.base_lng ?? null,
       abn: c.abn || '',
-      bank_account_name: c.bank_account_name || '',
-      bank_bsb: c.bank_bsb || '',
-      bank_account_number: c.bank_account_number || '',
       min_booking_minutes: c.min_booking_minutes ?? 120,
       notice_hours: c.notice_hours ?? 24,
       cancellation_policy: c.cancellation_policy || '',
@@ -179,7 +204,46 @@ export default function Cleaners() {
       availability: (c.availability as any) || defaultAvailability(),
       active: c.active !== false,
     })
+    setBankForm({ bank_account_name: '', bank_bsb: '', bank_account_number: '' })
+    setBankError(null)
     setLocationResults([])
+  }
+
+  const loadBankDetails = async () => {
+    if (!selectedId) return
+    setBankLoading(true)
+    setBankError(null)
+    try {
+      const { data, error } = await supabase.functions.invoke('get-cleaner-bank-details', {
+        body: { cleaner_id: selectedId },
+      })
+      if (error) throw error
+      const payload: any = data || {}
+      setBankForm({
+        bank_account_name: payload.bank_account_name || '',
+        bank_bsb: payload.bank_bsb || '',
+        bank_account_number: payload.bank_account_number || '',
+      })
+    } catch (e: any) {
+      setBankError(e?.message || 'Failed to load bank details')
+    } finally {
+      setBankLoading(false)
+    }
+  }
+
+  const migrateExistingBankDetails = async () => {
+    setBankLoading(true)
+    setBankError(null)
+    try {
+      const { data, error } = await supabase.functions.invoke('migrate-cleaner-bank-details', { body: {} })
+      if (error) throw error
+      const migrated = (data as any)?.migrated
+      setBankError(migrated ? null : null)
+    } catch (e: any) {
+      setBankError(e?.message || 'Migration failed')
+    } finally {
+      setBankLoading(false)
+    }
   }
 
   const handleLocationSearch = useCallback(async (q: string) => {
@@ -223,9 +287,6 @@ export default function Cleaners() {
       base_lat: form.base_lat,
       base_lng: form.base_lng,
       abn: form.abn.trim() || null,
-      bank_account_name: form.bank_account_name.trim() || null,
-      bank_bsb: form.bank_bsb.trim() || null,
-      bank_account_number: form.bank_account_number.trim() || null,
       min_booking_minutes: Number(form.min_booking_minutes) || 120,
       notice_hours: Number(form.notice_hours) || 24,
       cancellation_policy: form.cancellation_policy.trim() || null,
@@ -247,13 +308,40 @@ export default function Cleaners() {
     }
 
     try {
+      let cleanerId = selectedId
       if (selectedId) {
         const { error: err } = await supabase.from('cleaners').update(payload).eq('id', selectedId)
         if (err) throw err
       } else {
         const { data, error: err } = await supabase.from('cleaners').insert(payload).select('id').single()
         if (err) throw err
-        if (data?.id) setSelectedId(data.id)
+        if (data?.id) {
+          cleanerId = data.id
+          setSelectedId(data.id)
+        }
+      }
+
+      // Bank details are saved separately (encrypted at rest) via Edge Function.
+      const hasBank =
+        bankForm.bank_account_name.trim() || bankForm.bank_bsb.trim() || bankForm.bank_account_number.trim()
+      if (cleanerId && hasBank) {
+        setBankLoading(true)
+        setBankError(null)
+        try {
+          const { error: bankErr } = await supabase.functions.invoke('set-cleaner-bank-details', {
+            body: {
+              cleaner_id: cleanerId,
+              bank_account_name: bankForm.bank_account_name,
+              bank_bsb: bankForm.bank_bsb,
+              bank_account_number: bankForm.bank_account_number,
+            },
+          })
+          if (bankErr) {
+            setBankError(bankErr.message || 'Failed to save bank details')
+          }
+        } finally {
+          setBankLoading(false)
+        }
       }
       await fetchCleaners()
     } catch (e: any) {
@@ -474,25 +562,52 @@ export default function Cleaners() {
 
               <div className="md:col-span-2">
                 <label className="block text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Bank details</label>
+                {bankError && (
+                  <div className="mb-2 p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-200">
+                    {bankError}
+                  </div>
+                )}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <input
-                    value={form.bank_account_name}
-                    onChange={(e) => setForm((p) => ({ ...p, bank_account_name: e.target.value }))}
+                    value={bankForm.bank_account_name}
+                    onChange={(e) => setBankForm((p) => ({ ...p, bank_account_name: e.target.value }))}
                     placeholder="Account name"
                     className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
                   />
                   <input
-                    value={form.bank_bsb}
-                    onChange={(e) => setForm((p) => ({ ...p, bank_bsb: e.target.value }))}
+                    value={bankForm.bank_bsb}
+                    onChange={(e) => setBankForm((p) => ({ ...p, bank_bsb: e.target.value }))}
                     placeholder="BSB"
                     className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
                   />
                   <input
-                    value={form.bank_account_number}
-                    onChange={(e) => setForm((p) => ({ ...p, bank_account_number: e.target.value }))}
+                    value={bankForm.bank_account_number}
+                    onChange={(e) => setBankForm((p) => ({ ...p, bank_account_number: e.target.value }))}
                     placeholder="Account number"
                     className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
                   />
+                </div>
+                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={loadBankDetails}
+                    disabled={!selectedId || bankLoading}
+                    className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white text-xs border border-white/10 disabled:opacity-60"
+                  >
+                    {bankLoading ? 'Loading…' : 'Load bank details'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={migrateExistingBankDetails}
+                    disabled={bankLoading}
+                    className="px-3 py-1.5 rounded-lg bg-amber-600/20 hover:bg-amber-600/30 text-amber-100 text-xs border border-amber-400/30 disabled:opacity-60"
+                    title="Encrypt any existing plaintext bank details in the database (admin-only)"
+                  >
+                    Migrate existing (encrypt)
+                  </button>
+                  <span className="text-[11px] text-[var(--color-text-muted)]">
+                    Stored encrypted at rest. Requires admin role.
+                  </span>
                 </div>
               </div>
 

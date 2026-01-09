@@ -4,15 +4,6 @@ import { supabase } from '../lib/supabase'
 import PaymentReminderSms from './PaymentReminderSms'
 import ReviewReminderSms from './ReviewReminderSms'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://etiaoqskgplpfydblzne.supabase.co'
-const supabaseAnonKey =
-  import.meta.env.VITE_SUPABASE_ANON_KEY ||
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV0aWFvcXNrZ3BscGZ5ZGJsem5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcyMzI0NzAsImV4cCI6MjA4MjgwODQ3MH0.c-AlsveEx_bxVgEivga3PRrBp5ylY3He9EJXbaa2N2c'
-
-const dialpadUserId = '6452247499866112'
-const dialpadToken =
-  'NNRYnLXqJgkWXePcCG2SGCVzHfuB6kxAqQATPvnmn3x6k5RevHUCPdF8zF8jqXsssuyG67bEALxZH9TACsq4aARA46VL4yZ246Kf'
-const dialpadCallUrl = `https://dialpad.com/api/v2/users/${dialpadUserId}/initiate_call`
 const googleReviewUrl =
   import.meta.env.VITE_GOOGLE_REVIEW_URL ||
   'https://g.page/r/CleaningReview' // TODO: replace with the actual review link
@@ -340,20 +331,10 @@ export default function CompletedJobs() {
     setInfoMessage(null)
     setCallingId(row.occurrence.id)
     try {
-      const response = await fetch(dialpadCallUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          accept: 'application/json',
-          authorization: `Bearer ${dialpadToken}`,
-        },
-        body: JSON.stringify({ phone_number: phoneNumber }),
+      const { error: fnError } = await supabase.functions.invoke('dialpad-initiate-call', {
+        body: { phone_number: phoneNumber },
       })
-      const result = await response.json().catch(() => ({}))
-      if (!response.ok || result?.error) {
-        const details = result?.error || `Failed to initiate call (status ${response.status})`
-        throw new Error(details)
-      }
+      if (fnError) throw new Error(fnError.message || 'Failed to initiate call')
       setInfoMessage(`Calling ${phoneNumber}...`)
       // Update last call time optimistically
       setLastCalls((prev) => ({ ...prev, [row.occurrence.id]: new Date().toISOString() }))
@@ -448,14 +429,8 @@ export default function CompletedJobs() {
     try {
       const description =
         series.title || quote?.service || `Cleaning for ${lead?.name || 'customer'}`
-      const response = await fetch(`${supabaseUrl}/functions/v1/create-payment-link`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: supabaseAnonKey,
-          Authorization: `Bearer ${supabaseAnonKey}`,
-        },
-        body: JSON.stringify({
+      const { data, error: fnError } = await supabase.functions.invoke('create-payment-link', {
+        body: {
           amount_cents: amountCents,
           currency: 'aud',
           customerName: lead?.name || '',
@@ -463,18 +438,16 @@ export default function CompletedJobs() {
           description,
           success_url: `${window.location.origin}/payment-success`,
           cancel_url: `${window.location.origin}/payment-cancel`,
-        }),
+        },
       })
-
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok || !data?.url) {
-        throw new Error(data?.error || 'Failed to create Stripe link')
-      }
+      if (fnError) throw new Error(fnError.message || 'Failed to create Stripe link')
+      const url = (data as any)?.url as string | undefined
+      if (!url) throw new Error('Failed to create Stripe link')
 
       const { error: updateError } = await supabase
         .from('booking_occurrences')
         .update({
-          payment_link: data.url,
+          payment_link: url,
           payment_status: 'invoice_sent',
           payment_amount_cents: amountCents,
         })
@@ -489,7 +462,7 @@ export default function CompletedJobs() {
                 ...r,
                 occurrence: {
                   ...r.occurrence,
-                  payment_link: data.url,
+                  payment_link: url,
                   payment_status: 'invoice_sent',
                   payment_amount_cents: amountCents,
                 },
@@ -834,8 +807,6 @@ export default function CompletedJobs() {
                         occurrenceId={occurrence.id}
                         leadName={lead?.name}
                         phoneNumber={lead?.phone_number || undefined}
-                        dialpadToken={dialpadToken}
-                        dialpadUserId={dialpadUserId}
                         paymentLink={occurrence.payment_link || undefined}
                         quoteLink={quoteShareUrl || undefined}
                         amountCents={amountCents}
@@ -848,8 +819,6 @@ export default function CompletedJobs() {
                         occurrenceId={occurrence.id}
                         leadName={lead?.name}
                         phoneNumber={lead?.phone_number || undefined}
-                        dialpadToken={dialpadToken}
-                        dialpadUserId={dialpadUserId}
                         reviewLink={googleReviewUrl}
                         onSent={() => {
                           setInfoMessage('Review reminder sent')

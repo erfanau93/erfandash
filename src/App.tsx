@@ -7,6 +7,7 @@ import CompletedJobs from './components/CompletedJobs'
 import Cleaners from './components/Cleaners'
 import Dispatch from './components/Dispatch'
 import JobModal from './components/JobModal'
+import AuthGate from './components/AuthGate'
 
 function PaymentStatus({ success }: { success?: boolean }) {
   return (
@@ -61,60 +62,48 @@ function App() {
     )
   }
 
-  if (path.endsWith('/salesfunnel')) {
-    return (
+  const protectedRoutes = (
+    <AuthGate>
       <div className="animated-bg min-h-screen">
-        <SalesFunnel />
-        <JobModal />
+        {path.endsWith('/salesfunnel') ? (
+          <>
+            <SalesFunnel />
+            <JobModal />
+          </>
+        ) : path.endsWith('/calendar') ? (
+          <>
+            <Calendar />
+            <JobModal />
+          </>
+        ) : path.endsWith('/completed') || path.endsWith('/completed-jobs') ? (
+          <>
+            <CompletedJobs />
+            <JobModal />
+          </>
+        ) : path.endsWith('/cleaners') ? (
+          <>
+            <Cleaners />
+            <JobModal />
+          </>
+        ) : path.endsWith('/dispatch') ? (
+          <>
+            <Dispatch />
+            <JobModal />
+          </>
+        ) : (
+          <>
+            <Dashboard />
+            <div className="max-w-7xl mx-auto px-8 pb-8">
+              <WebhookDebug />
+            </div>
+            <JobModal />
+          </>
+        )}
       </div>
-    )
-  }
-
-  if (path.endsWith('/calendar')) {
-    return (
-      <div className="animated-bg min-h-screen">
-        <Calendar />
-        <JobModal />
-      </div>
-    )
-  }
-
-  if (path.endsWith('/completed') || path.endsWith('/completed-jobs')) {
-    return (
-      <div className="animated-bg min-h-screen">
-        <CompletedJobs />
-        <JobModal />
-      </div>
-    )
-  }
-
-  if (path.endsWith('/cleaners')) {
-    return (
-      <div className="animated-bg min-h-screen">
-        <Cleaners />
-        <JobModal />
-      </div>
-    )
-  }
-
-  if (path.endsWith('/dispatch')) {
-    return (
-      <div className="animated-bg min-h-screen">
-        <Dispatch />
-        <JobModal />
-      </div>
-    )
-  }
-
-  return (
-    <div className="animated-bg min-h-screen">
-      <Dashboard />
-      <div className="max-w-7xl mx-auto px-8 pb-8">
-        <WebhookDebug />
-      </div>
-      <JobModal />
-    </div>
+    </AuthGate>
   )
+
+  return protectedRoutes
 }
 
 export default App

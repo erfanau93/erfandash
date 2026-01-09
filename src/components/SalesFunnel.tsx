@@ -19,15 +19,6 @@ type ExtractedLead = {
   last_text_body?: string | null
 }
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://etiaoqskgplpfydblzne.supabase.co'
-const supabaseAnonKey =
-  import.meta.env.VITE_SUPABASE_ANON_KEY ||
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV0aWFvcXNrZ3BscGZ5ZGJsem5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcyMzI0NzAsImV4cCI6MjA4MjgwODQ3MH0.c-AlsveEx_bxVgEivga3PRrBp5ylY3He9EJXbaa2N2c'
-
-const dialpadUserId = '6452247499866112'
-const dialpadUrl = `https://dialpad.com/api/v2/users/${dialpadUserId}/initiate_call`
-const dialpadToken = 'NNRYnLXqJgkWXePcCG2SGCVzHfuB6kxAqQATPvnmn3x6k5RevHUCPdF8zF8jqXsssuyG67bEALxZH9TACsq4aARA46VL4yZ246Kf'
-
 const STATUSES = ['Unanswered', 'Follow Up', 'Quote Sent', 'Job Won', 'Not interested', 'Jobs Completed']
 
 const STATUS_COLORS: Record<string, { bg: string; border: string; header: string; dot: string }> = {
@@ -99,19 +90,11 @@ export default function SalesFunnel() {
       // Optimistic update
       setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status: status || null } : l)))
 
-      const response = await fetch(`${supabaseUrl}/functions/v1/update-lead-status`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: supabaseAnonKey,
-          Authorization: `Bearer ${supabaseAnonKey}`,
-        },
-        body: JSON.stringify({ leadId, status }),
+      const { error: fnError } = await supabase.functions.invoke('update-lead-status', {
+        body: { leadId, status },
       })
-
-      const result = await response.json().catch(() => ({}))
-      if (!response.ok || result?.error) {
-        throw new Error(result?.error || 'Failed to update lead status')
+      if (fnError) {
+        throw new Error(fnError.message || 'Failed to update lead status')
       }
     } catch (err) {
       console.error('Error updating lead status:', err)
@@ -155,20 +138,10 @@ export default function SalesFunnel() {
     setCallError(null)
     setCallingLeadId(lead.id)
     try {
-      const response = await fetch(dialpadUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          accept: 'application/json',
-          authorization: `Bearer ${dialpadToken}`,
-        },
-        body: JSON.stringify({ phone_number: lead.phone_number }),
+      const { error: fnError } = await supabase.functions.invoke('dialpad-initiate-call', {
+        body: { phone_number: lead.phone_number },
       })
-
-      const result = await response.json().catch(() => ({}))
-      if (!response.ok || result?.error) {
-        throw new Error(result?.error || 'Failed to initiate call')
-      }
+      if (fnError) throw new Error(fnError.message || 'Failed to initiate call')
 
       // Record first contact time if not already set
       if (!lead.first_contact) {
@@ -407,8 +380,6 @@ export default function SalesFunnel() {
                               leadId={lead.id}
                               leadName={lead.name}
                               phoneNumber={lead.phone_number}
-                              dialpadToken={dialpadToken}
-                              dialpadUserId={dialpadUserId}
                               onSent={({ sentAt, message }) => {
                                 setLeads((prev) =>
                                   prev.map((l) =>

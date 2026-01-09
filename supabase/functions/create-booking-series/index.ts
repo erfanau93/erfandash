@@ -14,6 +14,8 @@
 // }
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
+import { corsHeaders, isCorsAllowed } from '../_shared/cors.ts'
+import { requireRole, requireUser } from '../_shared/auth.ts'
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
@@ -101,37 +103,43 @@ function generateOccurrences(
   return dates
 }
 
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': '*',
+      ...headers,
     },
   })
 }
 
 Deno.serve(async (req) => {
+  const headers = corsHeaders(req)
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
       status: 200,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      },
+      headers,
     })
   }
 
+  if (!isCorsAllowed(req)) {
+    return jsonResponse({ error: 'CORS blocked' }, 403, headers)
+  }
+
   if (req.method !== 'POST') {
-    return jsonResponse({ error: 'Method not allowed' }, 405)
+    return jsonResponse({ error: 'Method not allowed' }, 405, headers)
   }
 
   if (!supabaseUrl || !supabaseServiceKey) {
-    return jsonResponse({ error: 'Server configuration error' }, 500)
+    return jsonResponse({ error: 'Server configuration error' }, 500, headers)
   }
+
+  // Require authenticated staff/admin
+  const auth = await requireUser(req)
+  if ('error' in auth) return auth.error
+  const forbidden = requireRole(auth.role, ['admin', 'staff'])
+  if (forbidden) return forbidden
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
@@ -139,20 +147,20 @@ Deno.serve(async (req) => {
   try {
     payload = await req.json()
   } catch {
-    return jsonResponse({ error: 'Invalid JSON body' }, 400)
+    return jsonResponse({ error: 'Invalid JSON body' }, 400, headers)
   }
 
   // Validate required fields
   if (!payload.leadId) {
-    return jsonResponse({ error: 'leadId is required' }, 400)
+    return jsonResponse({ error: 'leadId is required' }, 400, headers)
   }
   if (!payload.startsAt) {
-    return jsonResponse({ error: 'startsAt is required' }, 400)
+    return jsonResponse({ error: 'startsAt is required' }, 400, headers)
   }
 
   const startDate = new Date(payload.startsAt)
   if (isNaN(startDate.getTime())) {
-    return jsonResponse({ error: 'startsAt must be a valid ISO date' }, 400)
+    return jsonResponse({ error: 'startsAt must be a valid ISO date' }, 400, headers)
   }
 
   const durationMinutes = payload.durationMinutes || 120
@@ -168,7 +176,7 @@ Deno.serve(async (req) => {
   if (payload.untilDate) {
     untilDate = new Date(payload.untilDate)
     if (isNaN(untilDate.getTime())) {
-      return jsonResponse({ error: 'untilDate must be a valid ISO date' }, 400)
+      return jsonResponse({ error: 'untilDate must be a valid ISO date' }, 400, headers)
     }
   }
 
@@ -184,7 +192,7 @@ Deno.serve(async (req) => {
       .single()
 
     if (leadError || !lead) {
-      return jsonResponse({ error: 'Lead not found' }, 404)
+      return jsonResponse({ error: 'Lead not found' }, 404, headers)
     }
 
     // 2. Create the booking series
@@ -207,7 +215,7 @@ Deno.serve(async (req) => {
 
     if (seriesError || !series) {
       console.error('Error creating booking series:', seriesError)
-      return jsonResponse({ error: seriesError?.message || 'Failed to create booking series' }, 500)
+      return jsonResponse({ error: seriesError?.message || 'Failed to create booking series' }, 500, headers)
     }
 
     // 3. Generate occurrence dates
@@ -264,11 +272,11 @@ Deno.serve(async (req) => {
         name: lead.name,
         email: lead.email,
       },
-    })
+    }, 200, headers)
   } catch (err) {
     console.error('Unexpected error:', err)
     const message = err instanceof Error ? err.message : 'Unexpected error'
-    return jsonResponse({ error: message }, 500)
+    return jsonResponse({ error: message }, 500, headers)
   }
 })
 

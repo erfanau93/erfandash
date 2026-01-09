@@ -15,13 +15,9 @@ type SmsLeadProps = {
   leadId: string
   leadName?: string | null
   phoneNumber?: string | null
-  dialpadToken: string
-  dialpadUserId: string
   onSent?: (payload: { sentAt: string; message: string }) => void
   prefillBody?: string
 }
-
-const SMS_ENDPOINT = 'https://dialpad.com/api/v2/sms'
 
 const DEFAULT_SMS_TEMPLATES: SmsTemplate[] = [
   {
@@ -65,8 +61,6 @@ export default function SmsLead({
   leadId,
   leadName,
   phoneNumber,
-  dialpadToken,
-  dialpadUserId,
   onSent,
   prefillBody,
 }: SmsLeadProps) {
@@ -215,40 +209,11 @@ export default function SmsLead({
     setSendingError(null)
     setSendSuccess(null)
     try {
-      const payload = {
-        infer_country_code: false,
-        to_numbers: [phoneNumber],
-        user_id: dialpadUserId,
-        text: resolvedBody.trim(),
-      }
-
-      const response = await fetch(SMS_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          accept: 'application/json',
-          authorization: `Bearer ${dialpadToken}`,
-        },
-        body: JSON.stringify(payload),
+      const { error } = await supabase.functions.invoke('dialpad-send-sms', {
+        body: { to_numbers: [phoneNumber], text: resolvedBody.trim() },
       })
-
-      const textBody = await response.text()
-      let parsed: any = null
-      try {
-        parsed = textBody ? JSON.parse(textBody) : null
-      } catch (parseErr) {
-        parsed = null
-      }
-
-      if (!response.ok || parsed?.error) {
-        const rawError = parsed?.error
-        const errorDetail =
-          typeof rawError === 'string'
-            ? rawError
-            : rawError
-            ? JSON.stringify(rawError)
-            : textBody || `Failed to send SMS (status ${response.status})`
-        throw new Error(errorDetail)
+      if (error) {
+        throw new Error(error.message || 'Failed to send SMS')
       }
 
       const sentAtMs = Date.now()
@@ -273,11 +238,7 @@ export default function SmsLead({
       setSendSuccess('SMS sent successfully')
     } catch (err: any) {
       console.error('Error sending SMS', err)
-      if (err?.message?.includes('Failed to fetch')) {
-        setSendingError('Failed to reach Dialpad. Browser may be blocking the request (CORS). Try again or use a server-side proxy.')
-      } else {
-        setSendingError(err instanceof Error ? err.message : 'Failed to send SMS')
-      }
+      setSendingError(err instanceof Error ? err.message : 'Failed to send SMS')
     } finally {
       setIsSending(false)
     }
@@ -397,19 +358,25 @@ export default function SmsLead({
             style={{ top: dropdownStyle.top, left: dropdownStyle.left, width: dropdownStyle.width, maxWidth: '94vw' }}
           >
             <div className="p-2.5 border-b border-white/10 flex items-center justify-between">
-            <div>
-              <h4 className="text-sm text-white font-semibold">SMS Templates</h4>
-              <p className="text-[11px] text-[var(--color-text-muted)]">Sends as user {dialpadUserId}</p>
+              <div>
+                <h4 className="text-sm text-white font-semibold">SMS Templates</h4>
+                <p className="text-[11px] text-[var(--color-text-muted)]">Sent via secure server proxy</p>
+              </div>
+              <button
+                onClick={() => setIsOpen(false)}
+                className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors"
+              >
+                <svg
+                  className="w-4 h-4 text-gray-400"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
-            <button
-              onClick={() => setIsOpen(false)}
-              className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors"
-            >
-              <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
 
             {(sendingError || sendSuccess) && (
               <div className="px-3 pt-3 space-y-2">
@@ -495,7 +462,7 @@ export default function SmsLead({
               </div>
 
               <div className="flex items-center justify-between">
-                <span className="text-[11px] text-[var(--color-text-muted)]">Uses Dialpad user {dialpadUserId}</span>
+                <span className="text-[11px] text-[var(--color-text-muted)]">Sent via secure server proxy</span>
                 <button
                   onClick={handleSend}
                   disabled={isSending || !phoneNumber}

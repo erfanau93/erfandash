@@ -9,11 +9,7 @@ import {
   type QuoteResult,
   type ServiceType,
 } from '../lib/quoteCalculator'
-
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://etiaoqskgplpfydblzne.supabase.co'
-const supabaseAnonKey =
-  import.meta.env.VITE_SUPABASE_ANON_KEY ||
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV0aWFvcXNrZ3BscGZ5ZGJsem5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcyMzI0NzAsImV4cCI6MjA4MjgwODQ3MH0.c-AlsveEx_bxVgEivga3PRrBp5ylY3He9EJXbaa2N2c'
+import { env } from '../env'
 
 type LeadReference = {
   id?: string
@@ -90,9 +86,7 @@ function generateShareToken() {
   return crypto.randomUUID().replace(/-/g, '').slice(0, 16)
 }
 
-const MAPBOX_TOKEN =
-  import.meta.env.VITE_MAPBOX_TOKEN ||
-  'pk.eyJ1IjoiZXJmYW5hdTkzIiwiYSI6ImNtNXdhamt5NjBhb2oyb3BuOW9vNWI0enoifQ.tXCrpuXtRhzBAntnYa_N-g'
+const MAPBOX_TOKEN = env.mapboxToken || ''
 
 export default function QuoteTool({ lead, emailId, autoEditLatest = false }: QuoteToolProps) {
   const [form, setForm] = useState<QuoteInput>({
@@ -425,14 +419,8 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
         ? `${window.location.origin}?quote=${shareToken}&payment_status=cancelled`
         : `${window.location.origin}?payment_status=cancelled`
 
-      const response = await fetch(`${supabaseUrl}/functions/v1/create-payment-link`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: supabaseAnonKey,
-          Authorization: `Bearer ${supabaseAnonKey}`,
-        },
-        body: JSON.stringify({
+      const { data, error: fnError } = await supabase.functions.invoke('create-payment-link', {
+        body: {
           amount_cents: amountCents,
           currency: 'aud',
           quoteId: editingQuoteId || latestQuote?.id || leadId || 'manual',
@@ -441,15 +429,13 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
           description: description || `Cleaning service for ${customerName || lead?.name || 'customer'}`,
           success_url: successUrl,
           cancel_url: cancelUrl,
-        }),
+        },
       })
+      if (fnError) throw new Error(fnError.message || 'Failed to create Stripe link')
+      const url = (data as any)?.url as string | undefined
+      if (!url) throw new Error('Failed to create Stripe link')
 
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok || !data?.url) {
-        throw new Error(data?.error || 'Failed to create Stripe link')
-      }
-
-      setStripeLinkUrl(data.url)
+      setStripeLinkUrl(url)
       setSaveMessage('Stripe payment link created.')
     } catch (err) {
       console.error('Stripe link error:', err)
@@ -509,6 +495,10 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
 
   const handleAddressSearch = useCallback(
     async (query: string) => {
+      if (!MAPBOX_TOKEN) {
+        setAddressResults([])
+        return
+      }
       if (!query || query.length < 3) {
         setAddressResults([])
         return
@@ -539,42 +529,19 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
     setIsDescLoading(true)
     setCalcError(null)
     try {
-      const payload = {
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You write a concise (30–60 words) customer-facing summary of cleaning work. Use only the provided facts (service, rooms, add-ons, custom add-ons, notes). No assumptions or extra services. Be clear, friendly, and factual. Do not present the customer as part of the cleaning team.',
-          },
-          {
-            role: 'user',
-            content: `Create a 30–60 word summary of what Sydney Premium Cleaning will do. Facts only, no hallucinations. Name: ${
-              lead?.name || 'customer'
-            }. Service: ${form.service}. Bedrooms: ${form.bedrooms}. Bathrooms: ${form.bathrooms}. Add-ons: ${
-              form.addons.join(', ') || 'none'
-            }. Custom add-ons: ${form.customAddons.map((c) => `${c.name} $${c.price}`).join(', ') || 'none'}. Notes: ${
-              notes || 'none'
-            }. The name is the customer/recipient, not the cleaning provider. Refer to the customer as "you" or by name, and the cleaner as Sydney Premium Cleaning.`,
-          },
-        ],
-        temperature: 0.6,
-        max_tokens: 180,
-      }
-      const apiKey = import.meta.env.VITE_OPENAI_KEY
-      if (!apiKey) {
-        throw new Error('Missing VITE_OPENAI_KEY for description generation')
-      }
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
+      const { data, error } = await supabase.functions.invoke('generate-quote-description', {
+        body: {
+          customerName: lead?.name || customerName || 'customer',
+          service: form.service,
+          bedrooms: form.bedrooms,
+          bathrooms: form.bathrooms,
+          addons: form.addons,
+          customAddons: form.customAddons,
+          notes: notes || '',
         },
-        body: JSON.stringify(payload),
       })
-      const data = await res.json()
-      const text = data?.choices?.[0]?.message?.content?.trim()
+      if (error) throw new Error(error.message || 'Failed to generate description')
+      const text = (data as any)?.text as string | undefined
       if (!text) throw new Error('No description returned')
       setDescription(text)
     } catch (err) {

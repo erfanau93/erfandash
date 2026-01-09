@@ -1,7 +1,7 @@
 {
   "name": "call",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -18,13 +18,21 @@
     "vite": "^7.2.4"
   },
   "dependencies": {
+    "@fullcalendar/core": "^6.1.20",
+    "@fullcalendar/daygrid": "^6.1.20",
+    "@fullcalendar/interaction": "^6.1.20",
+    "@fullcalendar/react": "^6.1.20",
+    "@fullcalendar/timegrid": "^6.1.20",
     "@stripe/react-stripe-js": "^2.9.0",
     "@stripe/stripe-js": "^3.5.0",
     "@supabase/supabase-js": "^2.89.0",
+    "@types/mapbox-gl": "^3.4.1",
     "date-fns": "^4.1.0",
+    "mapbox-gl": "^3.17.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-is": "^19.2.3",
-    "recharts": "^3.6.0"
+    "recharts": "^3.6.0",
+    "rrule": "^2.8.1"
   }
 }

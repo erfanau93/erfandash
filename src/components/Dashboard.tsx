@@ -7,6 +7,7 @@ import CommunicationsLog from './CommunicationsLog'
 import QuoteTool from './QuoteTool'
 import Lead from './Lead'
 import SmsLead from './SmsLead'
+import BookingModal from './BookingModal'
 import { subDays } from 'date-fns'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://etiaoqskgplpfydblzne.supabase.co'
@@ -242,6 +243,11 @@ function LiveIndicator() {
   )
 }
 
+type PendingQuoteNav = {
+  leadId: string | null
+  editQuoteId: string | null
+}
+
 export default function Dashboard() {
   const [metrics, setMetrics] = useState<Metrics>({
     uniqueCalls: 0,
@@ -270,7 +276,10 @@ export default function Dashboard() {
   const [allEmails, setAllEmails] = useState<DialpadEmail[]>([])
   const [savingStatusId, setSavingStatusId] = useState<string | null>(null)
   const [quoteLead, setQuoteLead] = useState<ExtractedLead | null>(null)
+  const [bookingLead, setBookingLead] = useState<ExtractedLead | null>(null)
+  const [pendingJobWonLead, setPendingJobWonLead] = useState<ExtractedLead | null>(null)
   const [showManualLeadForm, setShowManualLeadForm] = useState(false)
+  const [pendingQuoteNav, setPendingQuoteNav] = useState<PendingQuoteNav | null>(null)
   const [manualLead, setManualLead] = useState({
     name: '',
     phone_number: '',
@@ -519,6 +528,64 @@ export default function Dashboard() {
   }, [getStartOfToday, selectedDate])
 
   // Initial fetch and realtime subscription
+  // Capture URL parameters once on mount for quote navigation
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const leadId = params.get('lead')
+    const editQuoteId = params.get('editQuote')
+    if (leadId || editQuoteId) {
+      setPendingQuoteNav({ leadId, editQuoteId })
+    }
+  }, [])
+
+  // When leads are loaded (or fetched), open the quote modal and optionally clean the URL
+  useEffect(() => {
+    if (!pendingQuoteNav) return
+    const { leadId, editQuoteId } = pendingQuoteNav
+    if (!leadId) return
+
+    const found = extractedLeads.find((l) => l.id === leadId)
+    if (found) {
+      setQuoteLead(found)
+
+      if (editQuoteId) {
+        const params = new URLSearchParams(window.location.search)
+        params.delete('editQuote')
+        const cleaned = params.toString()
+        const newUrl = window.location.pathname + (cleaned ? `?${cleaned}` : '')
+        window.history.replaceState({}, '', newUrl)
+      }
+      setPendingQuoteNav(null)
+      return
+    }
+
+    // Fallback: fetch the lead directly if not in the current list
+    let cancelled = false
+    const fetchLead = async () => {
+      const { data, error } = await supabase.from('extracted_leads').select('*').eq('id', leadId).maybeSingle()
+      if (cancelled) return
+      if (!error && data) {
+        const lead = data as ExtractedLead
+        setQuoteLead(lead)
+        // Optionally append so future renders know about it
+        setExtractedLeads((prev) => (prev.find((l) => l.id === lead.id) ? prev : [lead, ...prev]))
+
+        if (editQuoteId) {
+          const params = new URLSearchParams(window.location.search)
+          params.delete('editQuote')
+          const cleaned = params.toString()
+          const newUrl = window.location.pathname + (cleaned ? `?${cleaned}` : '')
+          window.history.replaceState({}, '', newUrl)
+        }
+        setPendingQuoteNav(null)
+      }
+    }
+    fetchLead()
+    return () => {
+      cancelled = true
+    }
+  }, [pendingQuoteNav, extractedLeads])
+
   useEffect(() => {
     fetchMetrics()
 
@@ -637,7 +704,16 @@ export default function Dashboard() {
     }
   }
 
-  const handleUpdateLeadStatus = async (leadId: string, status: string) => {
+  const handleUpdateLeadStatus = async (leadId: string, status: string, skipBookingPrompt = false) => {
+    // If changing to "Job Won", show booking modal first (unless skipping)
+    if (status === 'Job Won' && !skipBookingPrompt) {
+      const lead = extractedLeads.find((l) => l.id === leadId)
+      if (lead) {
+        setPendingJobWonLead(lead)
+        return
+      }
+    }
+
     try {
       setLeadStatusError(null)
       setSavingStatusId(leadId)
@@ -665,6 +741,28 @@ export default function Dashboard() {
     } finally {
       setSavingStatusId(null)
     }
+  }
+
+  // Handle booking modal success
+  const handleBookingSuccess = () => {
+    setPendingJobWonLead(null)
+    setBookingLead(null)
+    fetchMetrics() // Refresh to get updated status
+  }
+
+  // Handle booking modal skip - just update status without booking
+  const handleBookingSkip = () => {
+    if (pendingJobWonLead) {
+      handleUpdateLeadStatus(pendingJobWonLead.id, 'Job Won', true)
+    }
+    setPendingJobWonLead(null)
+    setBookingLead(null)
+  }
+
+  // Handle booking modal cancel
+  const handleBookingCancel = () => {
+    setPendingJobWonLead(null)
+    setBookingLead(null)
   }
 
   const handleCallLead = async (leadId: string, phoneNumber?: string | null) => {
@@ -870,6 +968,86 @@ export default function Dashboard() {
             <div className="flex items-center gap-4 flex-wrap">
               <DatePicker selectedDate={selectedDate} onDateChange={setSelectedDate} />
               <LiveIndicator />
+
+              <button
+                onClick={() => (window.location.href = '/calendar')}
+                className="flex items-center gap-2 px-4 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl transition-all duration-200"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"
+                  />
+                </svg>
+                Calendar
+              </button>
+
+              <button
+                onClick={() => (window.location.href = '/completed')}
+                className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all duration-200 border border-white/10"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9 12h6m-3-3v6m9 0a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                Completed jobs
+              </button>
+
+              <button
+                onClick={() => (window.location.href = '/dispatch')}
+                className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all duration-200 border border-white/10"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 01.553-.894L9 2m0 18l6-3m-6 3V2m6 15l5.447-2.724A1 1 0 0021 13.382V2.618a1 1 0 00-.553-.894L15 0m0 17V0"
+                  />
+                </svg>
+                Dispatch
+              </button>
+
+              <button
+                onClick={() => (window.location.href = '/cleaners')}
+                className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all duration-200 border border-white/10"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M17 20h5v-2a4 4 0 00-4-4h-1m-4 6H3v-2a4 4 0 014-4h6m4-10a4 4 0 11-8 0 4 4 0 018 0zm6 4a3 3 0 11-6 0 3 3 0 016 0z"
+                  />
+                </svg>
+                Cleaners
+              </button>
 
               <button
                 onClick={() => (window.location.href = '/salesfunnel')}
@@ -1619,6 +1797,29 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Booking Modal - shown when status changes to "Job Won" */}
+      {pendingJobWonLead && (
+        <BookingModal
+          lead={pendingJobWonLead}
+          onClose={handleBookingCancel}
+          onSuccess={handleBookingSuccess}
+          onSkip={handleBookingSkip}
+        />
+      )}
+
+      {/* Manual Booking Modal */}
+      {bookingLead && (
+        <BookingModal
+          lead={bookingLead}
+          onClose={() => setBookingLead(null)}
+          onSuccess={() => {
+            setBookingLead(null)
+            fetchMetrics()
+          }}
+          onSkip={() => setBookingLead(null)}
+        />
       )}
     </div>
   )

@@ -28,6 +28,8 @@ type QuoteRecord = {
   email_id: string | null
   quote_number?: string | null
   address?: string | null
+  address_lat?: number | null
+  address_lng?: number | null
   description?: string | null
   service: string
   bedrooms: number
@@ -67,6 +69,7 @@ type QuoteRecord = {
 type QuoteToolProps = {
   lead: LeadReference | null
   emailId: string | null
+  autoEditLatest?: boolean
 }
 
 const SERVICE_TYPES: { value: ServiceType; label: string }[] = [
@@ -91,7 +94,7 @@ const MAPBOX_TOKEN =
   import.meta.env.VITE_MAPBOX_TOKEN ||
   'pk.eyJ1IjoiZXJmYW5hdTkzIiwiYSI6ImNtNXdhamt5NjBhb2oyb3BuOW9vNWI0enoifQ.tXCrpuXtRhzBAntnYa_N-g'
 
-export default function QuoteTool({ lead, emailId }: QuoteToolProps) {
+export default function QuoteTool({ lead, emailId, autoEditLatest = false }: QuoteToolProps) {
   const [form, setForm] = useState<QuoteInput>({
     service: 'general',
     bedrooms: 2,
@@ -112,7 +115,9 @@ export default function QuoteTool({ lead, emailId }: QuoteToolProps) {
   const [loadingQuotes, setLoadingQuotes] = useState(false)
   const [notes, setNotes] = useState('')
   const [address, setAddress] = useState('')
-  const [addressResults, setAddressResults] = useState<string[]>([])
+  const [addressLat, setAddressLat] = useState<number | null>(null)
+  const [addressLng, setAddressLng] = useState<number | null>(null)
+  const [addressResults, setAddressResults] = useState<{ place_name: string; center?: [number, number] }[]>([])
   const [isDescLoading, setIsDescLoading] = useState(false)
   const [description, setDescription] = useState('')
   const [customerName, setCustomerName] = useState(lead?.name || '')
@@ -161,6 +166,59 @@ export default function QuoteTool({ lead, emailId }: QuoteToolProps) {
   useEffect(() => {
     refreshQuotes()
   }, [refreshQuotes])
+
+  // In some contexts (e.g. job modal), default to editing the latest quote so "Update quote" is the normal action.
+  useEffect(() => {
+    if (!autoEditLatest) return
+    if (loadingQuotes) return
+    if (editingQuoteId) return
+    const latest = quotes[0]
+    if (!latest) return
+    loadQuoteIntoForm(latest)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoEditLatest, loadingQuotes, quotes, editingQuoteId])
+
+  // Auto-load quote if editQuote parameter is present
+  useEffect(() => {
+    if (quotes.length === 0 || loadingQuotes) return
+    
+    const params = new URLSearchParams(window.location.search)
+    const editQuoteId = params.get('editQuote')
+    
+    if (editQuoteId && !editingQuoteId) {
+      const quoteToEdit = quotes.find((q) => q.id === editQuoteId)
+      if (quoteToEdit) {
+        // Load quote into form
+        setEditingQuoteId(quoteToEdit.id)
+        setEditingShareToken(quoteToEdit.share_token || null)
+        setEditingQuoteNumber(quoteToEdit.quote_number || null)
+        setEditingLeadId(quoteToEdit.lead_id || null)
+        setForm({
+          service: quoteToEdit.service as ServiceType,
+          bedrooms: quoteToEdit.bedrooms,
+          bathrooms: quoteToEdit.bathrooms,
+          addons: quoteToEdit.addons || [],
+          customAddons: quoteToEdit.custom_addons?.length ? quoteToEdit.custom_addons : [initialCustomAddon],
+          clientHourlyRate: Number(quoteToEdit.hourly_rate),
+          cleanerHourlyRate: Number(quoteToEdit.cleaner_rate),
+          discountApplied: quoteToEdit.discount_amount > 0,
+          discountPercentage: quoteToEdit.discount_amount > 0 ? DEFAULT_PRICING.DEFAULT_DISCOUNT_PCT : 0,
+          depositPercentage: Number(quoteToEdit.deposit_percentage),
+        })
+        setNotes(quoteToEdit.notes || '')
+        setDescription(quoteToEdit.description || '')
+        setAddress(quoteToEdit.address || '')
+        setCustomerName(quoteToEdit.customer_name || lead?.name || '')
+        setCustomerEmail(quoteToEdit.customer_email || lead?.email || '')
+        setCustomerPhone(quoteToEdit.customer_phone || lead?.phone_number || '')
+        
+        // Remove editQuote from URL
+        params.delete('editQuote')
+        const newUrl = window.location.pathname + (params.toString() ? `?${params.toString()}` : '')
+        window.history.replaceState({}, '', newUrl)
+      }
+    }
+  }, [quotes, loadingQuotes, editingQuoteId, lead])
 
   // Keep quotes in sync when they change (e.g., paid via public link)
   useEffect(() => {
@@ -232,7 +290,7 @@ export default function QuoteTool({ lead, emailId }: QuoteToolProps) {
   const clamp6_2 = (val: number) => clampValue(val, 9999.99)
   const clamp5_2 = (val: number) => clampValue(val, 999.99)
 
-  const handleSaveQuote = async () => {
+  const handleSaveQuote = async (mode: 'auto' | 'new' = 'auto') => {
     if (!leadId && !editingLeadId) {
       setCalcError('Extract the lead first to attach the quote.')
       return
@@ -270,6 +328,8 @@ export default function QuoteTool({ lead, emailId }: QuoteToolProps) {
         email_id: emailId ?? null,
         quote_number: editingQuoteNumber || quoteNumber,
         address: address || null,
+        address_lat: addressLat,
+        address_lng: addressLng,
         description: description || null,
         service: form.service,
         bedrooms: form.bedrooms,
@@ -300,7 +360,8 @@ export default function QuoteTool({ lead, emailId }: QuoteToolProps) {
       }
 
       let saved: QuoteRecord | null = null
-      if (editingQuoteId) {
+      const shouldUpdate = mode === 'auto' ? Boolean(editingQuoteId) : false
+      if (shouldUpdate) {
         const { data, error } = await supabase.from('quotes').update(payload).eq('id', editingQuoteId).select('*').single()
         if (error) throw error
         saved = data as QuoteRecord
@@ -459,7 +520,12 @@ export default function QuoteTool({ lead, emailId }: QuoteToolProps) {
         const res = await fetch(url)
         const data = await res.json()
         const suggestions =
-          data?.features?.map((f: any) => f.place_name).filter((s: string) => typeof s === 'string') || []
+          data?.features
+            ?.map((f: any) => ({
+              place_name: f?.place_name as string,
+              center: f?.center as [number, number] | undefined, // [lng, lat]
+            }))
+            .filter((x: any) => typeof x?.place_name === 'string' && x.place_name.length > 0) || []
         setAddressResults(suggestions)
       } catch (err) {
         console.error('Address lookup failed', err)
@@ -549,6 +615,8 @@ export default function QuoteTool({ lead, emailId }: QuoteToolProps) {
     setNotes(quote.notes || '')
     setDescription(quote.description || '')
     setAddress(quote.address || '')
+    setAddressLat(typeof quote.address_lat === 'number' ? quote.address_lat : null)
+    setAddressLng(typeof quote.address_lng === 'number' ? quote.address_lng : null)
     setCustomerName(quote.customer_name || lead?.name || '')
     setCustomerEmail(quote.customer_email || lead?.email || '')
     setCustomerPhone(quote.customer_phone || lead?.phone_number || '')
@@ -714,6 +782,8 @@ export default function QuoteTool({ lead, emailId }: QuoteToolProps) {
             value={address}
             onChange={(e) => {
               setAddress(e.target.value)
+              setAddressLat(null)
+              setAddressLng(null)
               handleAddressSearch(e.target.value)
             }}
             placeholder="Search or type address (powered by Mapbox; you can edit manually)"
@@ -724,19 +794,26 @@ export default function QuoteTool({ lead, emailId }: QuoteToolProps) {
             <div className="border border-white/10 rounded-lg bg-black/50 max-h-40 overflow-y-auto text-sm">
               {addressResults.map((item) => (
                 <button
-                  key={item}
+                  key={item.place_name}
                   type="button"
                   onClick={() => {
-                    setAddress(item)
+                    setAddress(item.place_name)
+                    setAddressLng(item.center?.[0] ?? null)
+                    setAddressLat(item.center?.[1] ?? null)
                     setAddressResults([])
                   }}
                   className="w-full text-left px-3 py-2 hover:bg-white/10 text-white"
                 >
-                  {item}
+                  {item.place_name}
                 </button>
               ))}
             </div>
           )}
+          <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+            {typeof addressLat === 'number' && typeof addressLng === 'number'
+              ? `Pinned: ${addressLat.toFixed(5)}, ${addressLng.toFixed(5)}`
+              : 'Not pinned yet — pick a suggestion to save coordinates.'}
+          </div>
         </div>
 
         <div className="space-y-2">
@@ -879,12 +956,22 @@ export default function QuoteTool({ lead, emailId }: QuoteToolProps) {
           <h5 className="text-sm text-white font-semibold">Save & share</h5>
           <div className="flex flex-col gap-2">
             <button
-              onClick={handleSaveQuote}
+              onClick={() => handleSaveQuote('auto')}
               disabled={!leadId || !calcResult || isSaving}
               className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold py-2 disabled:opacity-60"
             >
               {isSaving ? 'Saving...' : editingQuoteId ? 'Update quote' : 'Save quote'}
             </button>
+            {editingQuoteId && (
+              <button
+                onClick={() => handleSaveQuote('new')}
+                disabled={!leadId || !calcResult || isSaving}
+                className="w-full rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm py-2 disabled:opacity-60"
+                type="button"
+              >
+                Save as new quote
+              </button>
+            )}
             <button
               onClick={handleCopyLink}
               disabled={!shareUrl}

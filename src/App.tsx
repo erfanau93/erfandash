@@ -2,6 +2,11 @@ import Dashboard from './components/Dashboard'
 import WebhookDebug from './components/WebhookDebug'
 import QuotePublicView from './components/QuotePublicView'
 import SalesFunnel from './components/SalesFunnel'
+import Calendar from './components/Calendar'
+import CompletedJobs from './components/CompletedJobs'
+import Cleaners from './components/Cleaners'
+import Dispatch from './components/Dispatch'
+import JobModal from './components/JobModal'
 
 function PaymentStatus({ success }: { success?: boolean }) {
   return (
@@ -60,6 +65,43 @@ function App() {
     return (
       <div className="animated-bg min-h-screen">
         <SalesFunnel />
+        <JobModal />
+      </div>
+    )
+  }
+
+  if (path.endsWith('/calendar')) {
+    return (
+      <div className="animated-bg min-h-screen">
+        <Calendar />
+        <JobModal />
+      </div>
+    )
+  }
+
+  if (path.endsWith('/completed') || path.endsWith('/completed-jobs')) {
+    return (
+      <div className="animated-bg min-h-screen">
+        <CompletedJobs />
+        <JobModal />
+      </div>
+    )
+  }
+
+  if (path.endsWith('/cleaners')) {
+    return (
+      <div className="animated-bg min-h-screen">
+        <Cleaners />
+        <JobModal />
+      </div>
+    )
+  }
+
+  if (path.endsWith('/dispatch')) {
+    return (
+      <div className="animated-bg min-h-screen">
+        <Dispatch />
+        <JobModal />
       </div>
     )
   }
@@ -70,6 +112,7 @@ function App() {
       <div className="max-w-7xl mx-auto px-8 pb-8">
         <WebhookDebug />
       </div>
+      <JobModal />
     </div>
   )
 }

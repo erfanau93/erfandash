@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import SmsLead from './SmsLead'
 import QuoteTool from './QuoteTool'
+import BookingModal from './BookingModal'
 
 type ExtractedLead = {
   id: string
@@ -56,6 +57,8 @@ export default function SalesFunnel() {
   const [callingLeadId, setCallingLeadId] = useState<string | null>(null)
   const [callError, setCallError] = useState<string | null>(null)
   const [quoteLead, setQuoteLead] = useState<ExtractedLead | null>(null)
+  const [bookingLead, setBookingLead] = useState<ExtractedLead | null>(null)
+  const [pendingJobWonLead, setPendingJobWonLead] = useState<{ lead: ExtractedLead; fromStatus: string } | null>(null)
 
   const fetchLeads = async () => {
     try {
@@ -77,13 +80,24 @@ export default function SalesFunnel() {
     }
   }
 
-  const updateStatus = async (leadId: string, status: string) => {
+  const updateStatus = async (leadId: string, status: string, skipBookingPrompt = false) => {
+    const lead = leads.find((l) => l.id === leadId)
+    const previousStatus = lead?.status || ''
+
+    // If changing to "Job Won", show booking modal first (unless skipping)
+    if (status === 'Job Won' && !skipBookingPrompt && lead) {
+      setPendingJobWonLead({ lead, fromStatus: previousStatus })
+      setDraggingId(null)
+      setActiveColumn('')
+      return
+    }
+
     try {
       setSavingId(leadId)
       setError(null)
 
       // Optimistic update
-      setLeads((prev) => prev.map((lead) => (lead.id === leadId ? { ...lead, status: status || null } : lead)))
+      setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status: status || null } : l)))
 
       const response = await fetch(`${supabaseUrl}/functions/v1/update-lead-status`, {
         method: 'POST',
@@ -108,6 +122,28 @@ export default function SalesFunnel() {
       setDraggingId(null)
       setActiveColumn('')
     }
+  }
+
+  // Handle booking modal success - status already updated by the edge function
+  const handleBookingSuccess = () => {
+    setPendingJobWonLead(null)
+    setBookingLead(null)
+    fetchLeads() // Refresh to get updated status
+  }
+
+  // Handle booking modal skip - just update status without booking
+  const handleBookingSkip = () => {
+    if (pendingJobWonLead) {
+      updateStatus(pendingJobWonLead.lead.id, 'Job Won', true)
+    }
+    setPendingJobWonLead(null)
+    setBookingLead(null)
+  }
+
+  // Handle booking modal cancel - revert status
+  const handleBookingCancel = () => {
+    setPendingJobWonLead(null)
+    setBookingLead(null)
   }
 
   const handleCallLead = async (lead: ExtractedLead) => {
@@ -227,6 +263,15 @@ export default function SalesFunnel() {
               placeholder="Search..."
               className="px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-white text-xs w-32 focus:outline-none focus:border-emerald-500/50"
             />
+            <button
+              onClick={() => (window.location.href = '/calendar')}
+              className="p-1.5 rounded-lg bg-cyan-600/80 hover:bg-cyan-600 text-white transition"
+              title="Calendar View"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+              </svg>
+            </button>
             <button
               onClick={fetchLeads}
               disabled={isLoading}
@@ -386,6 +431,23 @@ export default function SalesFunnel() {
                               </svg>
                               Quote
                             </button>
+                            
+                            {/* Schedule button - shown for Job Won leads */}
+                            {lead.status === 'Job Won' && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setBookingLead(lead)
+                                }}
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] rounded bg-cyan-600 hover:bg-cyan-700 text-white transition"
+                                title="Schedule Booking"
+                              >
+                                <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                                </svg>
+                                Schedule
+                              </button>
+                            )}
                           </div>
 
                           <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-white/5">
@@ -438,6 +500,29 @@ export default function SalesFunnel() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Booking Modal - shown when status changes to "Job Won" */}
+      {pendingJobWonLead && (
+        <BookingModal
+          lead={pendingJobWonLead.lead}
+          onClose={handleBookingCancel}
+          onSuccess={handleBookingSuccess}
+          onSkip={handleBookingSkip}
+        />
+      )}
+
+      {/* Manual Booking Modal - for creating bookings from Job Won column */}
+      {bookingLead && (
+        <BookingModal
+          lead={bookingLead}
+          onClose={() => setBookingLead(null)}
+          onSuccess={() => {
+            setBookingLead(null)
+            fetchLeads()
+          }}
+          onSkip={() => setBookingLead(null)}
+        />
       )}
     </div>
   )

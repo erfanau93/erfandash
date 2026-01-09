@@ -194,4 +194,217 @@ body {
   color: white;
 }
 
+/* FullCalendar Dark Theme Styling */
+.calendar-wrapper {
+  --fc-border-color: rgba(148, 163, 184, 0.15);
+  --fc-button-bg-color: rgba(255, 255, 255, 0.1);
+  --fc-button-border-color: rgba(255, 255, 255, 0.1);
+  --fc-button-hover-bg-color: rgba(255, 255, 255, 0.2);
+  --fc-button-hover-border-color: rgba(255, 255, 255, 0.2);
+  --fc-button-active-bg-color: #0ea5e9;
+  --fc-button-active-border-color: #0ea5e9;
+  --fc-today-bg-color: rgba(14, 165, 233, 0.1);
+  --fc-event-border-color: transparent;
+  --fc-page-bg-color: transparent;
+  --fc-neutral-bg-color: rgba(30, 41, 59, 0.5);
+  --fc-list-event-hover-bg-color: rgba(255, 255, 255, 0.1);
+}
+
+.calendar-wrapper .fc {
+  font-family: var(--font-sans);
+}
+
+.calendar-wrapper .fc-toolbar-title {
+  color: white !important;
+  font-size: 1.25rem !important;
+  font-weight: 600 !important;
+}
+
+.calendar-wrapper .fc-button {
+  color: white !important;
+  font-weight: 500 !important;
+  border-radius: 0.5rem !important;
+  padding: 0.5rem 1rem !important;
+  text-transform: capitalize !important;
+}
+
+.calendar-wrapper .fc-button:focus {
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.4) !important;
+}
+
+.calendar-wrapper .fc-button-active {
+  background-color: #0ea5e9 !important;
+  border-color: #0ea5e9 !important;
+}
+
+.calendar-wrapper .fc-col-header-cell {
+  background: rgba(30, 41, 59, 0.5);
+  border-color: rgba(148, 163, 184, 0.15) !important;
+}
+
+.calendar-wrapper .fc-col-header-cell-cushion {
+  color: #94a3b8 !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  font-size: 0.75rem !important;
+  letter-spacing: 0.05em !important;
+  padding: 0.75rem 0.5rem !important;
+}
+
+.calendar-wrapper .fc-daygrid-day {
+  background: transparent !important;
+}
+
+.calendar-wrapper .fc-daygrid-day-number {
+  color: white !important;
+  font-weight: 500 !important;
+  padding: 0.5rem !important;
+}
+
+.calendar-wrapper .fc-daygrid-day.fc-day-today {
+  background: rgba(14, 165, 233, 0.1) !important;
+}
+
+.calendar-wrapper .fc-daygrid-day.fc-day-today .fc-daygrid-day-number {
+  color: #0ea5e9 !important;
+  font-weight: 700 !important;
+}
+
+.calendar-wrapper .fc-timegrid-slot {
+  border-color: rgba(148, 163, 184, 0.1) !important;
+}
+
+.calendar-wrapper .fc-timegrid-slot-label-cushion {
+  color: #64748b !important;
+  font-size: 0.75rem !important;
+}
+
+.calendar-wrapper .fc-timegrid-col.fc-day-today {
+  background: rgba(14, 165, 233, 0.05) !important;
+}
+
+.calendar-wrapper .fc-event {
+  border-radius: 0.375rem !important;
+  border: none !important;
+  padding: 0.125rem 0.375rem !important;
+  font-size: 0.8rem !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+.calendar-wrapper .fc-event:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.calendar-wrapper .fc-event-time {
+  font-weight: 600 !important;
+}
+
+.calendar-wrapper .fc-event-title {
+  font-weight: 500 !important;
+}
+
+.calendar-wrapper .fc-timegrid-event {
+  border-radius: 0.375rem !important;
+  min-height: 32px !important;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.25);
+}
+
+.calendar-wrapper .fc-scrollgrid {
+  border-color: rgba(148, 163, 184, 0.15) !important;
+}
+
+.calendar-wrapper .fc-scrollgrid td,
+.calendar-wrapper .fc-scrollgrid th {
+  border-color: rgba(148, 163, 184, 0.15) !important;
+}
+
+.calendar-wrapper .fc-more-link {
+  color: #0ea5e9 !important;
+  font-weight: 500 !important;
+}
+
+.calendar-wrapper .fc-popover {
+  background: #1e293b !important;
+  border: 1px solid rgba(148, 163, 184, 0.2) !important;
+  border-radius: 0.75rem !important;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4) !important;
+}
+
+.calendar-wrapper .fc-popover-header {
+  background: rgba(30, 41, 59, 0.8) !important;
+  color: white !important;
+  border-radius: 0.75rem 0.75rem 0 0 !important;
+}
+
+.calendar-wrapper .fc-popover-body {
+  background: #1e293b !important;
+}
+
+/* Improve readability of stacked/overlapping events */
+.calendar-wrapper .fc-timegrid-event-harness {
+  margin-right: 4px;
+}
+
+.calendar-wrapper .fc-timegrid-event .fc-event-main {
+  white-space: normal !important;
+  line-height: 1.2 !important;
+}
+
+/* Month view tweaks: smaller text and more breathing room */
+.calendar-wrapper .fc-daygrid-day-frame {
+  padding: 12px 10px !important;
+}
+
+.calendar-wrapper .fc-daygrid-event {
+  font-size: 0.7rem !important;
+  line-height: 1.1 !important;
+  padding: 2px 4px !important;
+  white-space: normal !important;
+}
+
+.calendar-wrapper .fc-daygrid-day-events {
+  margin-top: 4px !important;
+}
+
+.calendar-wrapper .fc {
+  min-height: 820px;
+}
+
+.calendar-wrapper .fc-daygrid-body {
+  min-height: 540px;
+}
+
+.calendar-wrapper .custom-calendar-event {
+  white-space: normal !important;
+}
+
+.calendar-wrapper .custom-calendar-event .fc-event-main {
+  display: flex !important;
+  flex-direction: column;
+  gap: 2px;
+  white-space: normal !important;
+  word-break: break-word;
+}
+
+.calendar-wrapper .fc-timegrid-event {
+  min-width: 120px;
+}
+
+.calendar-wrapper .fc-timegrid-event-harness {
+  margin-right: 6px;
+}
+
+.calendar-wrapper .fc-timegrid-now-indicator-line {
+  border-color: #ef4444 !important;
+  border-width: 2px !important;
+}
+
+.calendar-wrapper .fc-timegrid-now-indicator-arrow {
+  border-color: #ef4444 !important;
+  border-top-color: transparent !important;
+  border-bottom-color: transparent !important;
+}
 

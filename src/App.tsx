@@ -7,6 +7,42 @@ import CompletedJobs from './components/CompletedJobs'
 import Cleaners from './components/Cleaners'
 import Dispatch from './components/Dispatch'
 import JobModal from './components/JobModal'
+import GlobalSearch from './components/GlobalSearch'
+import MainNav from './components/MainNav'
+import Breadcrumbs from './components/Breadcrumbs'
+
+function getBreadcrumbs(path: string): Array<{ label: string; href?: string }> {
+  const normalizedPath = path.replace(/\/+$/, '') || '/'
+  
+  if (normalizedPath === '/') {
+    return [{ label: 'Dashboard' }]
+  }
+
+  const pathMap: Record<string, string> = {
+    '/salesfunnel': 'Sales Funnel',
+    '/calendar': 'Calendar',
+    '/dispatch': 'Dispatch',
+    '/cleaners': 'Cleaners',
+    '/completed': 'Completed Jobs',
+    '/completed-jobs': 'Completed Jobs',
+  }
+
+  const breadcrumbs: Array<{ label: string; href?: string }> = [
+    { label: 'Home', href: '/' }
+  ]
+  
+  if (pathMap[normalizedPath]) {
+    breadcrumbs.push({ label: pathMap[normalizedPath] })
+  } else if (normalizedPath !== '/') {
+    // For any other paths, show the path name
+    const pathName = normalizedPath.split('/').pop() || ''
+    breadcrumbs.push({ 
+      label: pathName.charAt(0).toUpperCase() + pathName.slice(1).replace(/-/g, ' ')
+    })
+  }
+
+  return breadcrumbs
+}
 
 function PaymentStatus({ success }: { success?: boolean }) {
   return (
@@ -61,9 +97,16 @@ function App() {
     )
   }
 
+  const breadcrumbs = getBreadcrumbs(path)
+
   if (path.endsWith('/salesfunnel')) {
     return (
       <div className="animated-bg min-h-screen">
+        <MainNav />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+          <Breadcrumbs items={breadcrumbs} />
+        </div>
+        <GlobalSearch />
         <SalesFunnel />
         <JobModal />
       </div>
@@ -73,6 +116,11 @@ function App() {
   if (path.endsWith('/calendar')) {
     return (
       <div className="animated-bg min-h-screen">
+        <MainNav />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+          <Breadcrumbs items={breadcrumbs} />
+        </div>
+        <GlobalSearch />
         <Calendar />
         <JobModal />
       </div>
@@ -82,6 +130,11 @@ function App() {
   if (path.endsWith('/completed') || path.endsWith('/completed-jobs')) {
     return (
       <div className="animated-bg min-h-screen">
+        <MainNav />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+          <Breadcrumbs items={breadcrumbs} />
+        </div>
+        <GlobalSearch />
         <CompletedJobs />
         <JobModal />
       </div>
@@ -91,6 +144,11 @@ function App() {
   if (path.endsWith('/cleaners')) {
     return (
       <div className="animated-bg min-h-screen">
+        <MainNav />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+          <Breadcrumbs items={breadcrumbs} />
+        </div>
+        <GlobalSearch />
         <Cleaners />
         <JobModal />
       </div>
@@ -100,6 +158,11 @@ function App() {
   if (path.endsWith('/dispatch')) {
     return (
       <div className="animated-bg min-h-screen">
+        <MainNav />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+          <Breadcrumbs items={breadcrumbs} />
+        </div>
+        <GlobalSearch />
         <Dispatch />
         <JobModal />
       </div>
@@ -108,6 +171,11 @@ function App() {
 
   return (
     <div className="animated-bg min-h-screen">
+      <MainNav />
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+        <Breadcrumbs items={breadcrumbs} />
+      </div>
+      <GlobalSearch />
       <Dashboard />
       <div className="max-w-7xl mx-auto px-8 pb-8">
         <WebhookDebug />

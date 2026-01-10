@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://etiaoqskgplpfydblzne.supabase.co'
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV0aWFvcXNrZ3BscGZ5ZGJsem5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcyMzI0NzAsImV4cCI6MjA4MjgwODQ3MH0.c-AlsveEx_bxVgEivga3PRrBp5ylY3He9EJXbaa2N2c'
+import { supabase } from '../lib/supabase'
 
 type RepeatType = 'none' | 'weekly' | 'fortnightly' | '3-weekly' | 'monthly' | '2-monthly'
 
@@ -20,6 +18,20 @@ interface BookingModalProps {
   onSuccess?: (seriesId: string) => void
   onSkip?: () => void
 }
+
+type CreateBookingPayload = {
+  leadId: string
+  startsAt: string
+  durationMinutes: number
+  repeatType: RepeatType
+  untilDate?: string
+  occurrenceCount?: number
+  notes?: string
+  timezone?: string
+  updateLeadStatus?: boolean
+}
+
+const DEFAULT_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Australia/Sydney'
 
 const REPEAT_OPTIONS: { value: RepeatType; label: string }[] = [
   { value: 'none', label: 'One-time (no repeat)' },
@@ -40,6 +52,141 @@ const DURATION_OPTIONS = [
   { value: 300, label: '5 hours' },
   { value: 360, label: '6 hours' },
 ]
+
+function repeatTypeToRRule(repeatType: RepeatType): string | null {
+  switch (repeatType) {
+    case 'weekly':
+      return 'FREQ=WEEKLY;INTERVAL=1'
+    case 'fortnightly':
+      return 'FREQ=WEEKLY;INTERVAL=2'
+    case '3-weekly':
+      return 'FREQ=WEEKLY;INTERVAL=3'
+    case 'monthly':
+      return 'FREQ=MONTHLY;INTERVAL=1'
+    case '2-monthly':
+      return 'FREQ=MONTHLY;INTERVAL=2'
+    case 'none':
+    default:
+      return null
+  }
+}
+
+function generateOccurrences(startDate: Date, rrule: string | null, untilDate: Date | null, maxCount: number): Date[] {
+  const dates: Date[] = [new Date(startDate)]
+
+  if (!rrule) return dates
+
+  const parts: Record<string, string> = {}
+  rrule.split(';').forEach((part) => {
+    const [key, value] = part.split('=')
+    if (key && value) parts[key] = value
+  })
+
+  const freq = parts['FREQ']
+  const interval = parseInt(parts['INTERVAL'] || '1', 10)
+  let currentDate = new Date(startDate)
+  const endDate = untilDate || new Date(startDate.getTime() + 365 * 24 * 60 * 60 * 1000) // default: 1 year
+
+  while (dates.length < maxCount) {
+    if (freq === 'WEEKLY') {
+      currentDate = new Date(currentDate.getTime() + interval * 7 * 24 * 60 * 60 * 1000)
+    } else if (freq === 'MONTHLY') {
+      const nextMonth = new Date(currentDate)
+      nextMonth.setMonth(nextMonth.getMonth() + interval)
+      currentDate = nextMonth
+    } else {
+      break
+    }
+
+    if (currentDate > endDate) break
+    dates.push(new Date(currentDate))
+  }
+
+  return dates
+}
+
+async function createBookingViaEdge(payload: CreateBookingPayload) {
+  const { data, error } = await supabase.functions.invoke('create-booking-series', {
+    body: payload,
+  })
+
+  if (error) {
+    throw new Error(error.message || 'Edge function failed')
+  }
+  if (data?.error) {
+    throw new Error(data.error)
+  }
+  if (!data?.series?.id) {
+    throw new Error('Edge function did not return a booking id')
+  }
+
+  return data
+}
+
+async function createBookingDirect(payload: CreateBookingPayload) {
+  const startDate = new Date(payload.startsAt)
+  if (Number.isNaN(startDate.getTime())) {
+    throw new Error('Please enter a valid date and time')
+  }
+
+  const rrule = repeatTypeToRRule(payload.repeatType)
+  const untilDate = payload.untilDate ? new Date(payload.untilDate) : null
+  const maxOccurrences = payload.occurrenceCount || (rrule ? 52 : 1)
+
+  const { data: leadExists, error: leadError } = await supabase
+    .from('extracted_leads')
+    .select('id')
+    .eq('id', payload.leadId)
+    .maybeSingle()
+
+  if (leadError || !leadExists) {
+    throw new Error('Lead not found')
+  }
+
+  const { data: series, error: seriesError } = await supabase
+    .from('booking_series')
+    .insert({
+      lead_id: payload.leadId,
+      title: 'Regular clean',
+      timezone: payload.timezone || DEFAULT_TIMEZONE,
+      starts_at: startDate.toISOString(),
+      duration_minutes: payload.durationMinutes || 120,
+      rrule,
+      until_date: untilDate ? untilDate.toISOString().split('T')[0] : null,
+      occurrence_count: payload.occurrenceCount || null,
+      notes: payload.notes || null,
+      status: 'active',
+    })
+    .select()
+    .single()
+
+  if (seriesError || !series) {
+    throw new Error(seriesError?.message || 'Failed to create booking series')
+  }
+
+  const occurrenceDates = generateOccurrences(startDate, rrule, untilDate, maxOccurrences)
+  const occurrenceRecords = occurrenceDates.map((date) => {
+    const endDate = new Date(date.getTime() + (payload.durationMinutes || 120) * 60 * 1000)
+    return {
+      series_id: series.id,
+      start_at: date.toISOString(),
+      end_at: endDate.toISOString(),
+      status: 'scheduled',
+    }
+  })
+
+  const { error: occurrencesError } = await supabase.from('booking_occurrences').insert(occurrenceRecords)
+  if (occurrencesError) {
+    await supabase.from('booking_series').delete().eq('id', series.id)
+    throw new Error(occurrencesError.message || 'Failed to create booking occurrences')
+  }
+
+  if (payload.updateLeadStatus !== false) {
+    await supabase.from('extracted_leads').update({ status: 'Job Won' }).eq('id', payload.leadId)
+  }
+
+  return { series }
+}
 
 export default function BookingModal({ lead, onClose, onSuccess, onSkip }: BookingModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -86,13 +233,14 @@ export default function BookingModal({ lead, onClose, onSuccess, onSkip }: Booki
     try {
       const startsAt = new Date(`${date}T${time}:00`)
       
-      const payload: Record<string, unknown> = {
+      const payload: CreateBookingPayload = {
         leadId: lead.id,
         startsAt: startsAt.toISOString(),
         durationMinutes: duration,
         repeatType,
         notes: notes || undefined,
         updateLeadStatus: true,
+        timezone: DEFAULT_TIMEZONE,
       }
 
       if (repeatType !== 'none') {
@@ -103,20 +251,12 @@ export default function BookingModal({ lead, onClose, onSuccess, onSkip }: Booki
         }
       }
 
-      const response = await fetch(`${supabaseUrl}/functions/v1/create-booking-series`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: supabaseAnonKey,
-          Authorization: `Bearer ${supabaseAnonKey}`,
-        },
-        body: JSON.stringify(payload),
-      })
-
-      const result = await response.json()
-
-      if (!response.ok || result.error) {
-        throw new Error(result.error || 'Failed to create booking')
+      let result
+      try {
+        result = await createBookingViaEdge(payload)
+      } catch (edgeErr) {
+        console.warn('Edge function failed, retrying direct:', edgeErr)
+        result = await createBookingDirect(payload)
       }
 
       onSuccess?.(result.series?.id)

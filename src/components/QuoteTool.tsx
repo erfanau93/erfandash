@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { fetchMapboxToken } from '../lib/mapbox'
 import {
   DEFAULT_PRICING,
   STANDARD_ADD_ONS,
@@ -90,10 +91,6 @@ function generateShareToken() {
   return crypto.randomUUID().replace(/-/g, '').slice(0, 16)
 }
 
-const MAPBOX_TOKEN =
-  import.meta.env.VITE_MAPBOX_TOKEN ||
-  'pk.eyJ1IjoiZXJmYW5hdTkzIiwiYSI6ImNtNXdhamt5NjBhb2oyb3BuOW9vNWI0enoifQ.tXCrpuXtRhzBAntnYa_N-g'
-
 export default function QuoteTool({ lead, emailId, autoEditLatest = false }: QuoteToolProps) {
   const [form, setForm] = useState<QuoteInput>({
     service: 'general',
@@ -117,7 +114,10 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
   const [address, setAddress] = useState('')
   const [addressLat, setAddressLat] = useState<number | null>(null)
   const [addressLng, setAddressLng] = useState<number | null>(null)
+  const [mapboxToken, setMapboxToken] = useState<string | null>(null)
+  const [mapboxError, setMapboxError] = useState<string | null>(null)
   const [addressResults, setAddressResults] = useState<{ place_name: string; center?: [number, number] }[]>([])
+  const [isAddressSearching, setIsAddressSearching] = useState(false)
   const [isDescLoading, setIsDescLoading] = useState(false)
   const [description, setDescription] = useState('')
   const [customerName, setCustomerName] = useState(lead?.name || '')
@@ -141,6 +141,18 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
     url.searchParams.set('quote', latestQuote.share_token)
     return url.toString()
   }, [latestQuote])
+
+  useEffect(() => {
+    fetchMapboxToken()
+      .then((token) => {
+        setMapboxToken(token)
+        setMapboxError(null)
+      })
+      .catch((err) => {
+        console.error('Mapbox token load failed', err)
+        setMapboxError(err instanceof Error ? err.message : 'Unable to load Mapbox token')
+      })
+  }, [])
 
   const refreshQuotes = useCallback(async () => {
     if (!leadId) return
@@ -509,14 +521,16 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
 
   const handleAddressSearch = useCallback(
     async (query: string) => {
-      if (!query || query.length < 3) {
+      if (!query || query.length < 3 || !mapboxToken) {
         setAddressResults([])
+        setIsAddressSearching(false)
         return
       }
+      setIsAddressSearching(true)
       try {
         const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
           query
-        )}.json?access_token=${MAPBOX_TOKEN}&autocomplete=true&limit=5&country=AU`
+        )}.json?access_token=${mapboxToken}&autocomplete=true&limit=5&country=AU`
         const res = await fetch(url)
         const data = await res.json()
         const suggestions =
@@ -530,9 +544,11 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
       } catch (err) {
         console.error('Address lookup failed', err)
         setAddressResults([])
+      } finally {
+        setIsAddressSearching(false)
       }
     },
-    []
+    [mapboxToken]
   )
 
   const handleGenerateDescription = async () => {
@@ -777,6 +793,11 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
           </div>
 
           <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider">Service address</label>
+          {mapboxError && (
+            <div className="text-[11px] text-red-200">
+              Map search unavailable: {mapboxError}
+            </div>
+          )}
           <input
             type="text"
             value={address}
@@ -790,6 +811,15 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
             className="w-full rounded-lg bg-[var(--color-surface)] border border-white/10 px-3 py-2 text-sm text-white"
             onBlur={() => setTimeout(() => setAddressResults([]), 150)}
           />
+          {isAddressSearching && (
+            <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] px-1">
+              <svg className="w-4 h-4 animate-spin text-cyan-300" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Searching addresses…
+            </div>
+          )}
           {addressResults.length > 0 && (
             <div className="border border-white/10 rounded-lg bg-black/50 max-h-40 overflow-y-auto text-sm">
               {addressResults.map((item) => (

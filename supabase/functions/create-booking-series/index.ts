@@ -231,7 +231,18 @@ Deno.serve(async (req) => {
 
     if (occurrencesError) {
       console.error('Error creating occurrences:', occurrencesError)
-      // Don't fail - series was created, occurrences can be regenerated
+      // Roll back the series so we don't return a "success" without any occurrences
+      const { error: rollbackError } = await supabase.from('booking_series').delete().eq('id', series.id)
+      if (rollbackError) {
+        console.error('Failed to rollback series after occurrence error:', rollbackError)
+      }
+      return jsonResponse(
+        {
+          error: 'Failed to create booking occurrences',
+          details: occurrencesError.message || occurrencesError,
+        },
+        500
+      )
     }
 
     // 5. Update lead status to "Job Won" if requested

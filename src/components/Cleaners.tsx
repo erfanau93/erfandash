@@ -284,20 +284,6 @@ export default function Cleaners() {
               <h1 className="text-3xl font-bold text-white mb-2">Cleaners</h1>
               <p className="text-[var(--color-text-muted)]">Onboard, update availability, and store rates.</p>
             </div>
-            <div className="flex items-center gap-3 flex-wrap">
-              <button
-                onClick={() => (window.location.href = '/dispatch')}
-                className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all border border-white/10"
-              >
-                Dispatch
-              </button>
-              <button
-                onClick={() => (window.location.href = '/calendar')}
-                className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all border border-white/10"
-              >
-                Calendar
-              </button>
-            </div>
           </div>
         </header>
 

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import Dashboard from './components/Dashboard'
 import WebhookDebug from './components/WebhookDebug'
 import QuotePublicView from './components/QuotePublicView'
@@ -44,6 +45,63 @@ function getBreadcrumbs(path: string): Array<{ label: string; href?: string }> {
   return breadcrumbs
 }
 
+function LoginScreen({
+  onLogin,
+  error,
+}: {
+  onLogin: (username: string, password: string) => void
+  error?: string
+}) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    onLogin(username.trim(), password)
+  }
+
+  return (
+    <div className="animated-bg min-h-screen flex items-center justify-center p-6 text-white">
+      <div className="w-full max-w-md rounded-2xl bg-[var(--color-surface)] border border-white/10 shadow-2xl p-6 space-y-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Sign in to continue</h1>
+          <p className="text-sm text-[var(--color-text-muted)] mt-1">
+            Shared quote links stay public without signing in.
+          </p>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-sm text-[var(--color-text-muted)]">Username</label>
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 outline-none"
+              placeholder="Username"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm text-[var(--color-text-muted)]">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 outline-none"
+              placeholder="Password"
+            />
+          </div>
+          {error && <p className="text-sm text-rose-300">{error}</p>}
+          <button
+            type="submit"
+            className="w-full rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white font-medium py-2 transition"
+          >
+            Sign in
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 function PaymentStatus({ success }: { success?: boolean }) {
   return (
     <div className="animated-bg min-h-screen flex items-center justify-center p-6 text-white">
@@ -81,6 +139,33 @@ function App() {
   const shareToken = params.get('quote')
   const path = window.location.pathname
 
+  const [isAuthed, setIsAuthed] = useState(false)
+  const [authChecked, setAuthChecked] = useState(false)
+  const [error, setError] = useState<string>()
+
+  useEffect(() => {
+    if (localStorage.getItem('authUser') === 'admin123') {
+      setIsAuthed(true)
+    }
+    setAuthChecked(true)
+  }, [])
+
+  const handleLogin = (username: string, password: string) => {
+    if (username === 'admin123' && password === 'BeCreative123!!') {
+      localStorage.setItem('authUser', 'admin123')
+      setIsAuthed(true)
+      setError(undefined)
+    } else {
+      setError('Invalid credentials')
+    }
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem('authUser')
+    setIsAuthed(false)
+    setError(undefined)
+  }
+
   if (path.endsWith('/payment-success')) {
     return <PaymentStatus success />
   }
@@ -97,11 +182,28 @@ function App() {
     )
   }
 
+  if (!authChecked) {
+    return null
+  }
+
+  if (!isAuthed) {
+    return <LoginScreen onLogin={handleLogin} error={error} />
+  }
+
   const breadcrumbs = getBreadcrumbs(path)
+  const logoutButton = (
+    <button
+      onClick={handleLogout}
+      className="fixed top-4 right-4 z-50 rounded-lg bg-white/10 hover:bg-white/20 border border-white/20 text-white text-sm font-medium px-3 py-1.5 backdrop-blur"
+    >
+      Logout
+    </button>
+  )
 
   if (path.endsWith('/salesfunnel')) {
     return (
       <div className="animated-bg min-h-screen">
+        {logoutButton}
         <MainNav />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
           <Breadcrumbs items={breadcrumbs} />
@@ -116,6 +218,7 @@ function App() {
   if (path.endsWith('/calendar')) {
     return (
       <div className="animated-bg min-h-screen">
+        {logoutButton}
         <MainNav />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
           <Breadcrumbs items={breadcrumbs} />
@@ -130,6 +233,7 @@ function App() {
   if (path.endsWith('/completed') || path.endsWith('/completed-jobs')) {
     return (
       <div className="animated-bg min-h-screen">
+        {logoutButton}
         <MainNav />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
           <Breadcrumbs items={breadcrumbs} />
@@ -144,6 +248,7 @@ function App() {
   if (path.endsWith('/cleaners')) {
     return (
       <div className="animated-bg min-h-screen">
+        {logoutButton}
         <MainNav />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
           <Breadcrumbs items={breadcrumbs} />
@@ -158,6 +263,7 @@ function App() {
   if (path.endsWith('/dispatch')) {
     return (
       <div className="animated-bg min-h-screen">
+        {logoutButton}
         <MainNav />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
           <Breadcrumbs items={breadcrumbs} />
@@ -171,6 +277,7 @@ function App() {
 
   return (
     <div className="animated-bg min-h-screen">
+      {logoutButton}
       <MainNav />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
         <Breadcrumbs items={breadcrumbs} />

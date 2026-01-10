@@ -591,18 +591,6 @@ export default function CompletedJobs() {
           </div>
           <div className="flex flex-wrap gap-2">
             <button
-              onClick={() => (window.location.href = '/')}
-              className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/10"
-            >
-              Dashboard
-            </button>
-            <button
-              onClick={() => (window.location.href = '/calendar')}
-              className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/10"
-            >
-              Calendar
-            </button>
-            <button
               onClick={fetchCompleted}
               className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500/40"
             >

@@ -57,6 +57,17 @@ export default function MainNav() {
                 </a>
               )
             })}
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new Event('open-global-search'))}
+              className="px-3 py-2 rounded-xl border text-sm transition-colors bg-white/5 hover:bg-white/10 text-white border-white/10 flex items-center gap-2"
+              title="Search (Ctrl/Cmd+K)"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 100-15 7.5 7.5 0 000 15z" />
+              </svg>
+              <span className="hidden sm:inline">Search</span>
+            </button>
           </nav>
         </div>
       </div>

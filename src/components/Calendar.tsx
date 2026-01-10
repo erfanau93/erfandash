@@ -80,6 +80,11 @@ const MAPBOX_TOKEN =
   import.meta.env.VITE_MAPBOX ||
   ''
 
+const CALENDAR_VIEWS = ['dayGridMonth', 'timeGridWeek', 'timeGridDay'] as const
+type CalendarView = (typeof CALENDAR_VIEWS)[number]
+const isCalendarView = (val: string | null | undefined): val is CalendarView =>
+  CALENDAR_VIEWS.includes(val as CalendarView)
+
 async function mapboxSuggest(query: string) {
   if (!MAPBOX_TOKEN) return []
   const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
@@ -519,9 +524,39 @@ export default function Calendar() {
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
+  const [initialCalendarView] = useState<CalendarView>(() => {
+    if (typeof window === 'undefined') return 'timeGridWeek'
+    const params = new URLSearchParams(window.location.search)
+    const fromUrl = params.get('calView')
+    const fromStorage = (() => {
+      try {
+        return localStorage.getItem('calendar-view')
+      } catch {
+        return null
+      }
+    })()
+    const candidate = (fromUrl || fromStorage) as string | null
+    return isCalendarView(candidate) ? candidate : 'timeGridWeek'
+  })
+  const [initialCalendarDate] = useState<Date>(() => {
+    if (typeof window === 'undefined') return new Date()
+    const params = new URLSearchParams(window.location.search)
+    const fromUrl = params.get('calDate')
+    const fromStorage = (() => {
+      try {
+        return localStorage.getItem('calendar-date')
+      } catch {
+        return null
+      }
+    })()
+    const candidate = fromUrl || fromStorage
+    const parsed = candidate ? new Date(candidate) : null
+    return parsed && !Number.isNaN(parsed.getTime()) ? parsed : new Date()
+  })
   const [dateRange, setDateRange] = useState({ start: new Date(), end: new Date() })
   const [lastRangeKey, setLastRangeKey] = useState<string>('')
   const [fetchError, setFetchError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const calendarRef = useRef<FullCalendar>(null)
   const [cleaners, setCleaners] = useState<Cleaner[]>([])
   const [reviewTarget, setReviewTarget] = useState<{
@@ -631,13 +666,38 @@ export default function Calendar() {
   }, [])
 
   // Handle date range change
-  const handleDatesSet = useCallback((dateInfo: { start: Date; end: Date }) => {
-    const key = `${dateInfo.start.toISOString()}_${dateInfo.end.toISOString()}`
-    if (key === lastRangeKey) return
-    setLastRangeKey(key)
-    setDateRange({ start: dateInfo.start, end: dateInfo.end })
-    fetchBookings(dateInfo.start, dateInfo.end)
-  }, [fetchBookings, lastRangeKey])
+  const handleDatesSet = useCallback(
+    (dateInfo: { start: Date; end: Date; view: { type: string } }) => {
+      const viewType = dateInfo.view?.type as string | undefined
+      const key = `${viewType || 'unknown'}_${dateInfo.start.toISOString()}_${dateInfo.end.toISOString()}`
+      if (key === lastRangeKey) return
+      setLastRangeKey(key)
+      setDateRange({ start: dateInfo.start, end: dateInfo.end })
+
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search)
+        params.set('calDate', dateInfo.start.toISOString())
+        if (isCalendarView(viewType)) {
+          params.set('calView', viewType)
+          try {
+            localStorage.setItem('calendar-view', viewType)
+          } catch {
+            // ignore storage failures
+          }
+        }
+        try {
+          localStorage.setItem('calendar-date', dateInfo.start.toISOString())
+        } catch {
+          // ignore storage failures
+        }
+        const newUrl = `${window.location.pathname}?${params.toString()}`
+        window.history.replaceState({}, '', newUrl)
+      }
+
+      fetchBookings(dateInfo.start, dateInfo.end)
+    },
+    [fetchBookings, lastRangeKey]
+  )
 
   // Handle event click
   const handleEventClick = useCallback((info: EventClickArg) => {
@@ -659,6 +719,8 @@ export default function Calendar() {
     const extendedProps = info.event.extendedProps as CalendarEvent['extendedProps']
     const originalStartAt = extendedProps.occurrence.original_start_at || extendedProps.occurrence.start_at
 
+    setActionError(null)
+
     const { error } = await supabase
       .from('booking_occurrences')
       .update({
@@ -670,6 +732,7 @@ export default function Calendar() {
 
     if (error) {
       console.error('Error moving booking:', error)
+      setActionError('Could not move booking. Please try again.')
       info.revert()
     }
   }, [])
@@ -851,47 +914,6 @@ export default function Calendar() {
               </p>
             </div>
 
-            <div className="flex items-center gap-3 flex-wrap">
-              <button
-                onClick={() => (window.location.href = '/')}
-                className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all duration-200 border border-white/10"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                </svg>
-                Dashboard
-              </button>
-              <button
-                onClick={() => (window.location.href = '/salesfunnel')}
-                className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all duration-200 border border-white/10"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M6 12h12M9 17h6" />
-                </svg>
-                Sales Funnel
-              </button>
-              <button
-                onClick={() => (window.location.href = '/completed')}
-                className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all duration-200 border border-white/10"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-3-3v6m9 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Completed jobs
-              </button>
-              <button
-                onClick={() => (window.location.href = '/dispatch')}
-                className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all duration-200 border border-white/10"
-              >
-                Dispatch
-              </button>
-              <button
-                onClick={() => (window.location.href = '/cleaners')}
-                className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all duration-200 border border-white/10"
-              >
-                Cleaners
-              </button>
-            </div>
           </div>
         </header>
 
@@ -908,6 +930,12 @@ export default function Calendar() {
             </div>
           ))}
         </div>
+
+        {actionError ? (
+          <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm">
+            {actionError}
+          </div>
+        ) : null}
 
         {/* Calendar */}
         <div className="glass-card rounded-2xl p-4 md:p-6 overflow-hidden">
@@ -930,7 +958,8 @@ export default function Calendar() {
               <FullCalendar
                 ref={calendarRef}
                 plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-                initialView="timeGridWeek"
+                initialView={initialCalendarView}
+                initialDate={initialCalendarDate}
                 headerToolbar={{
                   left: 'prev,next today',
                   center: 'title',

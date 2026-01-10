@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import mapboxgl from 'mapbox-gl'
 import { supabase } from '../lib/supabase'
+import { fetchMapboxToken } from '../lib/mapbox'
 
 type Cleaner = {
   id: string
@@ -30,12 +31,6 @@ type BookingOccurrence = {
     lead?: { id: string; name: string | null }
   }
 }
-
-const MAPBOX_TOKEN =
-  import.meta.env.VITE_MAPBOX_TOKEN ||
-  import.meta.env.VITE_MAPBOX_API_KEY ||
-  import.meta.env.VITE_MAPBOX ||
-  ''
 
 // NOTE: This uses Dialpad directly from the browser (same approach as other parts of this app).
 // If CORS blocks it, we can switch to an Edge Function proxy.
@@ -86,11 +81,43 @@ export default function Dispatch() {
 
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
-  const [selectedDate, setSelectedDate] = useState(() => toYmd(new Date()))
-  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('month')
+  const [selectedDate, setSelectedDate] = useState(() => {
+    if (typeof window === 'undefined') return toYmd(new Date())
+    const params = new URLSearchParams(window.location.search)
+    const urlDate = params.get('date')
+    const storedDate = (() => {
+      try {
+        return localStorage.getItem('dispatch-date')
+      } catch {
+        return null
+      }
+    })()
+    const candidate = urlDate || storedDate
+    if (candidate) {
+      const parsed = new Date(candidate)
+      if (!Number.isNaN(parsed.getTime())) return toYmd(parsed)
+    }
+    return toYmd(new Date())
+  })
+  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>(() => {
+    if (typeof window === 'undefined') return 'month'
+    const params = new URLSearchParams(window.location.search)
+    const urlView = params.get('view')
+    const storedView = (() => {
+      try {
+        return localStorage.getItem('dispatch-view')
+      } catch {
+        return null
+      }
+    })()
+    const candidate = (urlView || storedView) as 'day' | 'week' | 'month' | null
+    return candidate === 'day' || candidate === 'week' || candidate === 'month' ? candidate : 'month'
+  })
   const [jobs, setJobs] = useState<BookingOccurrence[]>([])
   const [cleaners, setCleaners] = useState<Cleaner[]>([])
   const [showCleaners, setShowCleaners] = useState(true)
+  const [mapboxToken, setMapboxToken] = useState<string | null>(null)
+  const [mapboxError, setMapboxError] = useState<string | null>(null)
 
   const [selectedCleanerIds, setSelectedCleanerIds] = useState<Record<string, boolean>>({})
   const [bulkMessage, setBulkMessage] = useState('')
@@ -119,12 +146,24 @@ export default function Dispatch() {
   const [pickerQuery, setPickerQuery] = useState('')
 
   useEffect(() => {
-    if (!MAPBOX_TOKEN) return
-    ;(mapboxgl as any).accessToken = MAPBOX_TOKEN
+    fetchMapboxToken()
+      .then((token) => {
+        setMapboxToken(token)
+        setMapboxError(null)
+      })
+      .catch((err) => {
+        console.error('Mapbox token load failed', err)
+        setMapboxError(err instanceof Error ? err.message : 'Unable to load Mapbox token')
+      })
   }, [])
 
   useEffect(() => {
-    if (!MAPBOX_TOKEN) return
+    if (!mapboxToken) return
+    ;(mapboxgl as any).accessToken = mapboxToken
+  }, [mapboxToken])
+
+  useEffect(() => {
+    if (!mapboxToken) return
     if (!mapContainerRef.current) return
     if (mapRef.current) return
 
@@ -136,22 +175,54 @@ export default function Dispatch() {
     })
 
     map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right')
+    map.once('load', () => {
+      // Ensure map renders if container size was 0 at init time
+      map.resize()
+    })
+    map.on('error', (evt) => {
+      console.error('Mapbox map error', evt?.error || evt)
+      setMapboxError('Map tiles failed to load. Check token/domain permissions.')
+    })
     mapRef.current = map
 
     return () => {
       map.remove()
       mapRef.current = null
     }
-  }, [])
+  }, [mapboxToken])
+
+  // Persist date + view in URL params and localStorage so navigation keeps context.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    params.set('date', selectedDate)
+    params.set('view', viewMode)
+    const newUrl = `${window.location.pathname}?${params.toString()}`
+    window.history.replaceState({}, '', newUrl)
+    try {
+      localStorage.setItem('dispatch-date', selectedDate)
+      localStorage.setItem('dispatch-view', viewMode)
+    } catch {
+      // ignore storage failures
+    }
+  }, [selectedDate, viewMode])
 
   const clearMarkers = () => {
     for (const m of markersRef.current) m.remove()
     markersRef.current = []
   }
 
-  const addJobMarker = (lng: number, lat: number, label: string, assigned: boolean) => {
+  const addJobMarker = (
+    job: BookingOccurrence,
+    lng: number,
+    lat: number,
+    label: string,
+    assignedCleanerName?: string | null
+  ) => {
     const map = mapRef.current
     if (!map) return
+    const assigned = Boolean(job.cleaner_id)
+
     const el = document.createElement('div')
     el.style.width = '14px'
     el.style.height = '14px'
@@ -160,10 +231,55 @@ export default function Dispatch() {
     el.style.border = assigned ? '2px solid rgba(34,197,94,0.95)' : '2px solid rgba(249,115,22,0.95)'
     el.style.background = assigned ? 'rgba(34,197,94,0.85)' : 'rgba(249,115,22,0.85)'
     el.style.cursor = 'pointer'
+    el.title = label
+
+    // Rich popup content so users can see/launch the job directly
+    const popupContent = document.createElement('div')
+    popupContent.style.display = 'grid'
+    popupContent.style.gap = '4px'
+    popupContent.style.maxWidth = '260px'
+    popupContent.style.color = '#0f172a'
+    popupContent.style.fontSize = '13px'
+
+    const titleEl = document.createElement('div')
+    titleEl.style.fontWeight = '600'
+    titleEl.textContent = label
+
+    const timeEl = document.createElement('div')
+    timeEl.style.color = '#475569'
+    timeEl.textContent = new Date(job.start_at).toLocaleString()
+
+    const statusEl = document.createElement('div')
+    statusEl.style.color = assigned ? '#16a34a' : '#ea580c'
+    statusEl.textContent = assignedCleanerName
+      ? `Assigned to ${assignedCleanerName}`
+      : assigned
+      ? 'Assigned'
+      : 'Unassigned'
+
+    const openBtn = document.createElement('button')
+    openBtn.type = 'button'
+    openBtn.textContent = 'Open job'
+    openBtn.style.marginTop = '6px'
+    openBtn.style.padding = '8px 10px'
+    openBtn.style.borderRadius = '10px'
+    openBtn.style.background = '#0ea5e9'
+    openBtn.style.color = '#fff'
+    openBtn.style.fontWeight = '600'
+    openBtn.style.border = 'none'
+    openBtn.style.cursor = 'pointer'
+    openBtn.onclick = () => {
+      window.dispatchEvent(new CustomEvent('open-job-modal', { detail: { occurrenceId: job.id } }))
+    }
+
+    popupContent.appendChild(titleEl)
+    popupContent.appendChild(timeEl)
+    popupContent.appendChild(statusEl)
+    popupContent.appendChild(openBtn)
 
     const marker = new mapboxgl.Marker({ element: el })
       .setLngLat([lng, lat])
-      .setPopup(new mapboxgl.Popup({ offset: 14 }).setText(label))
+      .setPopup(new mapboxgl.Popup({ offset: 14 }).setDOMContent(popupContent))
       .addTo(map)
 
     // Ensure popup opens when clicking the marker element
@@ -287,7 +403,8 @@ export default function Dispatch() {
       const lng = quotePin?.lng ?? j.series?.service_lng
       if (typeof lat === 'number' && typeof lng === 'number') {
         const label = `${j.series?.lead?.name || 'Customer'} • ${j.series?.title || 'Job'}`
-        addJobMarker(lng, lat, label, Boolean(j.cleaner_id))
+        const assignedCleaner = j.cleaner_id ? cleaners.find((c) => c.id === j.cleaner_id) : null
+        addJobMarker(j, lng, lat, label, assignedCleaner?.full_name ?? null)
       }
     }
 
@@ -297,7 +414,7 @@ export default function Dispatch() {
         addCleanerMarker(c)
       }
     }
-  }, [jobs, activeCleaners, showCleaners, quotePins])
+  }, [jobs, activeCleaners, showCleaners, quotePins, cleaners])
 
   const assignCleaner = async (occurrenceId: string, cleanerId: string | null) => {
     setError(null)
@@ -554,25 +671,19 @@ export default function Dispatch() {
               >
                 {showCleaners ? 'Hide cleaners' : 'Show cleaners'}
               </button>
-              <button
-                onClick={() => (window.location.href = '/cleaners')}
-                className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all border border-white/10"
-              >
-                Cleaners
-              </button>
-              <button
-                onClick={() => (window.location.href = '/calendar')}
-                className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all border border-white/10"
-              >
-                Calendar
-              </button>
             </div>
           </div>
         </header>
 
-        {!MAPBOX_TOKEN && (
+        {!mapboxToken && !mapboxError && (
           <div className="mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-200 text-sm">
-            Missing Mapbox token. Set <span className="font-mono">VITE_MAPBOX_TOKEN</span> to enable the map.
+            Loading Mapbox token from Supabase…
+          </div>
+        )}
+
+        {mapboxError && (
+          <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm">
+            Mapbox token unavailable. Check Supabase secret <span className="font-mono">MAPBOX_TOKEN</span>. {mapboxError}
           </div>
         )}
 

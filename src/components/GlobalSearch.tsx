@@ -47,6 +47,13 @@ export default function GlobalSearch() {
     return () => window.removeEventListener('keydown', handler)
   }, [toggle, close])
 
+  // Allow other components (e.g., nav button) to open the search via a custom event.
+  useEffect(() => {
+    const handleOpen = () => setIsOpen(true)
+    window.addEventListener('open-global-search', handleOpen)
+    return () => window.removeEventListener('open-global-search', handleOpen)
+  }, [])
+
   const trimmedQuery = useMemo(() => query.trim(), [query])
 
   const runSearch = useCallback(async () => {
@@ -115,8 +122,9 @@ export default function GlobalSearch() {
       }
 
       if (bookingRes.data) {
+        const bookingData = bookingRes.data as any[]
         aggregated.push(
-          ...bookingRes.data.map((occ) => ({
+          ...bookingData.map((occ) => ({
             id: occ.id,
             type: 'Booking' as const,
             label: occ.series?.title || 'Booking',

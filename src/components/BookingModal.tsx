@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { supabase } from '../lib/supabase'
+import { supabase, supabaseUrl, supabaseAnonKey } from '../lib/supabase'
 
 type RepeatType = 'none' | 'weekly' | 'fortnightly' | '3-weekly' | 'monthly' | '2-monthly'
 
@@ -106,21 +106,71 @@ function generateOccurrences(startDate: Date, rrule: string | null, untilDate: D
 }
 
 async function createBookingViaEdge(payload: CreateBookingPayload) {
-  const { data, error } = await supabase.functions.invoke('create-booking-series', {
-    body: payload,
-  })
+  try {
+    // Try using supabase client first
+    const { data, error } = await supabase.functions.invoke('create-booking-series', {
+      body: payload,
+    })
 
-  if (error) {
-    throw new Error(error.message || 'Edge function failed')
-  }
-  if (data?.error) {
-    throw new Error(data.error)
-  }
-  if (!data?.series?.id) {
-    throw new Error('Edge function did not return a booking id')
-  }
+    if (error) {
+      throw new Error(error.message || 'Edge function failed')
+    }
+    if (data?.error) {
+      throw new Error(data.error)
+    }
+    if (!data?.series?.id) {
+      throw new Error('Edge function did not return a booking id')
+    }
 
-  return data
+    return data
+  } catch (err) {
+    // If supabase.functions.invoke fails (e.g., network error, CORS issue), try direct fetch
+    // This handles cases where the Supabase client has issues but the endpoint is accessible
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error'
+    
+    // Check if it's a network/fetch error
+    if (errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError') || errorMessage.includes('fetch')) {
+      console.warn('Supabase client invoke failed with network error, trying direct fetch:', errorMessage)
+    }
+    
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
+      
+      const response = await fetch(`${supabaseUrl}/functions/v1/create-booking-series`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: supabaseAnonKey,
+          Authorization: `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      })
+      
+      clearTimeout(timeoutId)
+
+      const responseData = await response.json().catch(() => ({}))
+      
+      if (!response.ok || responseData?.error) {
+        throw new Error(responseData?.error || `Edge function failed (${response.status})`)
+      }
+      
+      if (!responseData?.series?.id) {
+        throw new Error('Edge function did not return a booking id')
+      }
+
+      return responseData
+    } catch (fetchErr) {
+      // Re-throw with a more descriptive error message
+      const fetchErrorMsg = fetchErr instanceof Error ? fetchErr.message : 'Unknown fetch error'
+      if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
+        throw new Error('Request timed out. Please try again.')
+      }
+      // Re-throw the original error if fetch also fails, but include fetch error for debugging
+      throw err instanceof Error ? err : new Error(`Edge function unavailable: ${fetchErrorMsg}`)
+    }
+  }
 }
 
 async function createBookingDirect(payload: CreateBookingPayload) {
@@ -191,6 +241,8 @@ async function createBookingDirect(payload: CreateBookingPayload) {
 export default function BookingModal({ lead, onClose, onSuccess, onSkip }: BookingModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showSuccess, setShowSuccess] = useState(false)
+  const [successData, setSuccessData] = useState<{ occurrencesCreated: number; startDate: string; seriesId?: string } | null>(null)
   
   // Form state
   const [date, setDate] = useState(() => {
@@ -255,12 +307,41 @@ export default function BookingModal({ lead, onClose, onSuccess, onSkip }: Booki
       try {
         result = await createBookingViaEdge(payload)
       } catch (edgeErr) {
-        console.warn('Edge function failed, retrying direct:', edgeErr)
-        result = await createBookingDirect(payload)
+        console.warn('Edge function failed, retrying with direct database insert:', edgeErr)
+        // Fallback to direct database insert if edge function fails
+        // This handles cases where edge functions aren't accessible (e.g., CORS, network issues)
+        try {
+          result = await createBookingDirect(payload)
+        } catch (directErr) {
+          // If direct insert also fails, throw with a helpful message
+          console.error('Both edge function and direct insert failed:', { edgeErr, directErr })
+          throw new Error(
+            directErr instanceof Error 
+              ? directErr.message 
+              : 'Failed to create booking. Please check your connection and try again.'
+          )
+        }
       }
 
-      onSuccess?.(result.series?.id)
-      onClose()
+      // Show success popup
+      const occurrencesCreated = result?.occurrences_created || (result?.series ? 1 : 0)
+      const seriesId = result?.series?.id
+      setSuccessData({
+        occurrencesCreated,
+        startDate: payload.startsAt,
+        seriesId,
+      })
+      setShowSuccess(true)
+      
+      // Auto-close after 3 seconds, then call success callback
+      setTimeout(() => {
+        setShowSuccess(false)
+        setTimeout(() => {
+          // Call success callback after popup is dismissed
+          onSuccess?.(seriesId)
+          onClose()
+        }, 300) // Small delay for animation
+      }, 3000)
     } catch (err) {
       console.error('Error creating booking:', err)
       setError(err instanceof Error ? err.message : 'Failed to create booking')
@@ -277,7 +358,7 @@ export default function BookingModal({ lead, onClose, onSuccess, onSkip }: Booki
   const modal = (
     <div 
       className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[10000] p-4"
-      onClick={onClose}
+      onClick={showSuccess ? undefined : onClose}
     >
       <div 
         className="bg-[#1a1d24] border border-white/10 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-hidden shadow-2xl"
@@ -497,6 +578,61 @@ export default function BookingModal({ lead, onClose, onSuccess, onSkip }: Booki
             </button>
           </div>
         </div>
+
+        {/* Success Popup Overlay */}
+        {showSuccess && successData && (
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[10001] transition-opacity duration-300">
+            <div className="bg-[#1a1d24] border border-emerald-500/30 rounded-2xl w-full max-w-md mx-4 p-6 shadow-2xl transform transition-all duration-300 scale-100">
+              <div className="flex flex-col items-center text-center space-y-4">
+                {/* Success Icon */}
+                <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mb-2">
+                  <svg
+                    className="w-10 h-10 text-emerald-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                </div>
+
+                {/* Success Message */}
+                <div>
+                  <h3 className="text-2xl font-bold text-white mb-2">Booking Scheduled!</h3>
+                  <p className="text-emerald-300/80 text-sm mb-1">
+                    {successData.occurrencesCreated === 1
+                      ? '1 booking occurrence created'
+                      : `${successData.occurrencesCreated} booking occurrences created`}
+                  </p>
+                  <p className="text-gray-400 text-xs">
+                    First booking: {new Date(successData.startDate).toLocaleString()}
+                  </p>
+                </div>
+
+                {/* Close Button */}
+                <button
+                  onClick={() => {
+                    const seriesId = successData?.seriesId
+                    setShowSuccess(false)
+                    setTimeout(() => {
+                      // Call success callback after popup is dismissed
+                      onSuccess?.(seriesId)
+                      onClose()
+                    }, 300)
+                  }}
+                  className="mt-4 px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-medium transition-all"
+                >
+                  Great!
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

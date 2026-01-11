@@ -7,6 +7,7 @@ import interactionPlugin from '@fullcalendar/interaction'
 import type { EventClickArg, EventDropArg, EventContentArg } from '@fullcalendar/core'
 import { supabase } from '../lib/supabase'
 import { format } from 'date-fns'
+import { fetchMapboxToken } from '../lib/mapbox'
 
 type Cleaner = {
   id: string
@@ -17,6 +18,7 @@ type Cleaner = {
 interface BookingSeries {
   id: string
   lead_id: string
+  quote_id?: string | null
   title: string
   timezone: string
   starts_at: string
@@ -74,22 +76,16 @@ const STATUS_COLORS: Record<string, { bg: string; border: string; text: string }
 // Visual cue: scheduled + cleaner assigned
 const ASSIGNED_SCHEDULED_COLORS = { bg: '#06b6d4', border: '#0891b2', text: '#0b1220' }
 
-const MAPBOX_TOKEN =
-  import.meta.env.VITE_MAPBOX_TOKEN ||
-  import.meta.env.VITE_MAPBOX_API_KEY ||
-  import.meta.env.VITE_MAPBOX ||
-  ''
-
 const CALENDAR_VIEWS = ['dayGridMonth', 'timeGridWeek', 'timeGridDay'] as const
 type CalendarView = (typeof CALENDAR_VIEWS)[number]
 const isCalendarView = (val: string | null | undefined): val is CalendarView =>
   CALENDAR_VIEWS.includes(val as CalendarView)
 
-async function mapboxSuggest(query: string) {
-  if (!MAPBOX_TOKEN) return []
+async function mapboxSuggest(query: string, token: string | null) {
+  if (!token) return []
   const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
     query
-  )}.json?access_token=${MAPBOX_TOKEN}&autocomplete=true&limit=5&country=AU`
+  )}.json?access_token=${token}&autocomplete=true&limit=5&country=AU`
   const res = await fetch(url)
   const data = await res.json().catch(() => ({}))
   const features = Array.isArray(data?.features) ? data.features : []
@@ -109,6 +105,8 @@ function EventDetailModal({
   cleaners,
   onAssignCleaner,
   onUpdateSeriesAddress,
+  mapboxToken,
+  mapboxError,
 }: {
   event: CalendarEvent
   onClose: () => void
@@ -122,6 +120,8 @@ function EventDetailModal({
     lat: number | null,
     lng: number | null
   ) => Promise<void>
+  mapboxToken: string | null
+  mapboxError: string | null
 }) {
   const { occurrence, series, lead } = event.extendedProps
   const [isUpdating, setIsUpdating] = useState(false)
@@ -152,22 +152,35 @@ function EventDetailModal({
   const [addressResults, setAddressResults] = useState<{ place_name: string; center?: [number, number] }[]>([])
 
   useEffect(() => {
-    // Lightweight "job summary": load latest quote for this lead (if any).
-    if (!lead?.id) {
-      setLatestQuote(null)
-      return
+    // Load the quote linked to this booking series
+    const quoteId = series?.quote_id
+    if (!quoteId) {
+      // Fallback for legacy bookings without quote_id
+      if (!lead?.id) {
+        setLatestQuote(null)
+        return
+      }
+      console.warn('Booking series missing quote_id, falling back to latest quote for lead')
     }
+
     let cancelled = false
     ;(async () => {
       setQuoteLoading(true)
       setQuoteError(null)
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from('quotes')
           .select('service, bedrooms, bathrooms, addons, total_inc_gst, cleaner_pay, created_at')
-          .eq('lead_id', lead.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
+
+        if (quoteId) {
+          // Load the specific linked quote
+          query = query.eq('id', quoteId)
+        } else {
+          // Legacy fallback: load latest quote for the lead
+          query = query.eq('lead_id', lead!.id).order('created_at', { ascending: false }).limit(1)
+        }
+
+        const { data, error } = await query
         if (error) throw error
         const q = (data && data[0]) as any
         if (!cancelled) {
@@ -193,7 +206,7 @@ function EventDetailModal({
     return () => {
       cancelled = true
     }
-  }, [lead?.id])
+  }, [series?.quote_id, lead?.id])
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -240,12 +253,12 @@ function EventDetailModal({
       return
     }
     try {
-      const results = await mapboxSuggest(q.trim())
+      const results = await mapboxSuggest(q.trim(), mapboxToken)
       setAddressResults(results)
     } catch {
       setAddressResults([])
     }
-  }, [])
+  }, [mapboxToken])
 
   const handleSelectAddress = async (place_name: string, center?: [number, number]) => {
     setUpdatingAddress(true)
@@ -432,9 +445,14 @@ function EventDetailModal({
                   ))}
                 </div>
               )}
-              {!MAPBOX_TOKEN && (
+              {mapboxError && (
                 <div className="text-xs text-amber-200/80">
-                  Mapbox token missing. Set <span className="font-mono">VITE_MAPBOX_TOKEN</span> to use autocomplete.
+                  Mapbox autocomplete unavailable: {mapboxError}
+                </div>
+              )}
+              {!mapboxToken && !mapboxError && (
+                <div className="text-xs text-gray-400">
+                  Loading Mapbox token...
                 </div>
               )}
             </div>
@@ -571,6 +589,8 @@ export default function Calendar() {
   const [reviewRating, setReviewRating] = useState<number>(5)
   const [reviewNotes, setReviewNotes] = useState<string>('')
   const [savingReview, setSavingReview] = useState(false)
+  const [mapboxToken, setMapboxToken] = useState<string | null>(null)
+  const [mapboxError, setMapboxError] = useState<string | null>(null)
 
   const renderEventContent = useCallback((arg: EventContentArg) => {
     const { event, timeText } = arg
@@ -606,6 +626,18 @@ export default function Calendar() {
   useEffect(() => {
     fetchCleaners()
   }, [fetchCleaners])
+
+  useEffect(() => {
+    fetchMapboxToken()
+      .then((token) => {
+        setMapboxToken(token)
+        setMapboxError(null)
+      })
+      .catch((err) => {
+        console.error('Mapbox token load failed', err)
+        setMapboxError(err instanceof Error ? err.message : 'Unable to load Mapbox token')
+      })
+  }, [])
 
   // Fetch bookings for current view
   const fetchBookings = useCallback(async (start: Date, end: Date) => {
@@ -1034,6 +1066,8 @@ export default function Calendar() {
           cleaners={cleaners}
           onAssignCleaner={handleAssignCleaner}
           onUpdateSeriesAddress={handleUpdateSeriesAddress}
+          mapboxToken={mapboxToken}
+          mapboxError={mapboxError}
         />
       )}
 

@@ -40,6 +40,7 @@ interface BookingSeries {
   rrule: string | null
   status: string
   notes: string | null
+  quote_id?: string | null
   lead?: Lead | null
 }
 
@@ -263,22 +264,46 @@ export default function CompletedJobs() {
       if (occError) throw occError
 
       const occurrences = (data || []) as any[]
-      const leadIds = Array.from(
+      const quoteIds = Array.from(
         new Set(
           occurrences
-            .map((occ) => occ?.series?.lead?.id)
+            .map((occ) => occ?.series?.quote_id)
             .filter(Boolean)
         )
-      )
+      ) as string[]
 
-      let latestQuotes: Record<string, QuoteRecord> = {}
-      if (leadIds.length) {
+      const quotesById: Record<string, QuoteRecord> = {}
+      if (quoteIds.length) {
         const { data: quotes, error: quotesError } = await supabase
           .from('quotes')
           .select(
             'id, lead_id, customer_name, customer_email, customer_phone, total_inc_gst, share_token, quote_number, service, accepted_payment_method'
           )
-          .in('lead_id', leadIds)
+          .in('id', quoteIds)
+
+        if (!quotesError && quotes) {
+          for (const quote of quotes as QuoteRecord[]) {
+            quotesById[quote.id] = quote
+          }
+        }
+      }
+
+      // Legacy fallback for series without a linked quote_id
+      const fallbackLeadIds = Array.from(
+        new Set(
+          occurrences
+            .map((occ) => (!occ?.series?.quote_id ? occ?.series?.lead?.id : null))
+            .filter(Boolean)
+        )
+      ) as string[]
+      const latestQuotes: Record<string, QuoteRecord> = {}
+      if (fallbackLeadIds.length) {
+        const { data: quotes, error: quotesError } = await supabase
+          .from('quotes')
+          .select(
+            'id, lead_id, customer_name, customer_email, customer_phone, total_inc_gst, share_token, quote_number, service, accepted_payment_method'
+          )
+          .in('lead_id', fallbackLeadIds)
           .order('created_at', { ascending: false })
 
         if (!quotesError && quotes) {
@@ -293,7 +318,10 @@ export default function CompletedJobs() {
       const mapped: CompletedRow[] = occurrences.map((occ) => {
         const series = occ.series as BookingSeries
         const lead = (series?.lead as Lead) || null
-        const quote = lead?.id ? latestQuotes[lead.id] : null
+        const linkedQuote = series?.quote_id ? quotesById[series.quote_id] : null
+        // Fallback only for legacy bookings created before quote_id requirement
+        const fallbackQuote = series?.quote_id ? null : (lead?.id ? latestQuotes[lead.id] : null)
+        const quote = linkedQuote || fallbackQuote || null
         return {
           occurrence: occ as BookingOccurrence,
           series,

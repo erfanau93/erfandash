@@ -109,13 +109,24 @@ export default function SalesFunnel() {
         body: JSON.stringify({ leadId, status }),
       })
 
-      const result = await response.json().catch(() => ({}))
+      let result: any = {}
+      try {
+        result = await response.json()
+      } catch (jsonError) {
+        // If response is not JSON, try to get text
+        const text = await response.text().catch(() => 'Unknown error')
+        throw new Error(`Server error (${response.status}): ${text || 'Invalid response format'}`)
+      }
+
       if (!response.ok || result?.error) {
-        throw new Error(result?.error || 'Failed to update lead status')
+        const details = result?.error || `HTTP ${response.status}: Failed to update lead status`
+        console.error('Update lead status error:', { httpStatus: response.status, result, leadId, newStatus: status })
+        throw new Error(details)
       }
     } catch (err) {
       console.error('Error updating lead status:', err)
-      setError(err instanceof Error ? err.message : 'Failed to update status')
+      const errorMessage = err instanceof Error ? err.message : 'Failed to update status'
+      setError(errorMessage)
       fetchLeads() // Revert on error
     } finally {
       setSavingId(null)
@@ -478,7 +489,7 @@ export default function SalesFunnel() {
               </button>
             </div>
             <div className="p-4">
-              <QuoteTool lead={quoteLead} emailId={quoteLead.email_id ?? null} />
+              <QuoteTool lead={quoteLead} emailId={quoteLead.email_id ?? null} autoEditLatest />
             </div>
           </div>
         </div>

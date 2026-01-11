@@ -29,6 +29,8 @@ type JobDetail = {
     title: string
     lead_id: string
     service_address: string | null
+    service_lat: number | null
+    service_lng: number | null
   }
   lead: LeadRecord | null
 }
@@ -156,7 +158,7 @@ export default function JobModal() {
             .from('booking_occurrences')
             .select(
               `id, start_at, end_at, status, cleaner_id,
-               series:booking_series(id, title, lead_id, service_address, lead:extracted_leads(id, name, email, phone_number))`
+               series:booking_series(id, title, lead_id, quote_id, service_address, service_lat, service_lng, lead:extracted_leads(id, name, email, phone_number))`
             )
             .eq('id', occurrenceId)
             .single(),
@@ -166,8 +168,81 @@ export default function JobModal() {
 
         const lead = (occ as any)?.series?.lead as LeadRecord | null
         const series = (occ as any)?.series as any
+        const quoteId = series?.quote_id as string | null
 
         setCleaners((cleanersData || []) as any)
+        
+        // Sync service address from the booking's linked quote
+        let syncedAddress = series?.service_address ?? null
+        let syncedLat = series?.service_lat ?? null
+        let syncedLng = series?.service_lng ?? null
+
+        if (series?.lead_id) {
+          try {
+            let quoteAddress: string | null = null
+            let quoteLat: number | null = null
+            let quoteLng: number | null = null
+
+            if (quoteId) {
+              const { data: quoteRow, error: quoteErr } = await supabase
+                .from('quotes')
+                .select('id, address, address_lat, address_lng')
+                .eq('id', quoteId)
+                .maybeSingle()
+
+              if (!quoteErr && quoteRow) {
+                quoteAddress = (quoteRow as any).address ?? null
+                quoteLat = typeof (quoteRow as any).address_lat === 'number' ? (quoteRow as any).address_lat : null
+                quoteLng = typeof (quoteRow as any).address_lng === 'number' ? (quoteRow as any).address_lng : null
+              }
+            } else {
+              // Legacy fallback for bookings created before quote_id requirement
+              console.warn('Booking series missing quote_id, falling back to latest quote')
+              const { data: quotesData, error: quotesErr } = await supabase
+                .from('quotes')
+                .select('id, address, address_lat, address_lng')
+                .eq('lead_id', series.lead_id)
+                .order('created_at', { ascending: false })
+                .limit(1)
+
+              if (!quotesErr && quotesData && quotesData.length > 0) {
+                const latestQuote = quotesData[0] as any
+                quoteAddress = latestQuote.address ?? null
+                quoteLat = typeof latestQuote.address_lat === 'number' ? latestQuote.address_lat : null
+                quoteLng = typeof latestQuote.address_lng === 'number' ? latestQuote.address_lng : null
+              }
+            }
+
+            const updatePayload: Record<string, any> = {}
+            if (quoteId && series.quote_id !== quoteId) {
+              updatePayload.quote_id = quoteId
+            }
+            if (quoteAddress && (!syncedAddress || syncedAddress !== quoteAddress)) {
+              updatePayload.service_address = quoteAddress
+            }
+            if (
+              typeof quoteLat === 'number' &&
+              typeof quoteLng === 'number' &&
+              (syncedLat !== quoteLat || syncedLng !== quoteLng)
+            ) {
+              updatePayload.service_lat = quoteLat
+              updatePayload.service_lng = quoteLng
+            }
+
+            if (Object.keys(updatePayload).length) {
+              const { error: updateErr } = await supabase.from('booking_series').update(updatePayload).eq('id', series.id)
+              if (!updateErr) {
+                syncedAddress = updatePayload.service_address ?? syncedAddress
+                syncedLat = updatePayload.service_lat ?? syncedLat
+                syncedLng = updatePayload.service_lng ?? syncedLng
+              }
+            }
+          } catch (syncErr) {
+            // Don't fail the whole load if sync fails, just log it
+            console.warn('Failed to sync address from quote:', syncErr)
+          }
+        }
+
         setJob({
           occurrence: {
             id: (occ as any).id,
@@ -180,7 +255,9 @@ export default function JobModal() {
             id: series?.id,
             title: series?.title,
             lead_id: series?.lead_id,
-            service_address: series?.service_address ?? null,
+            service_address: syncedAddress,
+            service_lat: syncedLat,
+            service_lng: syncedLng,
           },
           lead,
         })

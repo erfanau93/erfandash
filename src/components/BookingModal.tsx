@@ -12,6 +12,14 @@ interface Lead {
   region_notes?: string | null
 }
 
+interface Quote {
+  id: string
+  quote_number?: string | null
+  service?: string | null
+  total_inc_gst?: number | null
+  created_at: string
+}
+
 interface BookingModalProps {
   lead: Lead
   onClose: () => void
@@ -21,6 +29,7 @@ interface BookingModalProps {
 
 type CreateBookingPayload = {
   leadId: string
+  quoteId: string
   startsAt: string
   durationMinutes: number
   repeatType: RepeatType
@@ -183,6 +192,7 @@ async function createBookingDirect(payload: CreateBookingPayload) {
   const untilDate = payload.untilDate ? new Date(payload.untilDate) : null
   const maxOccurrences = payload.occurrenceCount || (rrule ? 52 : 1)
 
+  // Verify lead exists
   const { data: leadExists, error: leadError } = await supabase
     .from('extracted_leads')
     .select('id')
@@ -193,10 +203,23 @@ async function createBookingDirect(payload: CreateBookingPayload) {
     throw new Error('Lead not found')
   }
 
+  // Verify quote exists and belongs to lead
+  const { data: quoteExists, error: quoteError } = await supabase
+    .from('quotes')
+    .select('id')
+    .eq('id', payload.quoteId)
+    .eq('lead_id', payload.leadId)
+    .maybeSingle()
+
+  if (quoteError || !quoteExists) {
+    throw new Error('Quote not found or does not belong to this lead')
+  }
+
   const { data: series, error: seriesError } = await supabase
     .from('booking_series')
     .insert({
       lead_id: payload.leadId,
+      quote_id: payload.quoteId,
       title: 'Regular clean',
       timezone: payload.timezone || DEFAULT_TIMEZONE,
       starts_at: startDate.toISOString(),
@@ -262,6 +285,11 @@ export default function BookingModal({ lead, onClose, onSuccess, onSkip }: Booki
   const [occurrenceCount, setOccurrenceCount] = useState(12)
   const [notes, setNotes] = useState('')
 
+  // Quote selection state
+  const [quotes, setQuotes] = useState<Quote[]>([])
+  const [loadingQuotes, setLoadingQuotes] = useState(false)
+  const [selectedQuoteId, setSelectedQuoteId] = useState<string>('')
+
   // Handle ESC key
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -277,6 +305,35 @@ export default function BookingModal({ lead, onClose, onSuccess, onSkip }: Booki
     return () => { document.body.style.overflow = 'unset' }
   }, [])
 
+  // Load available quotes for this lead
+  useEffect(() => {
+    const loadQuotes = async () => {
+      setLoadingQuotes(true)
+      try {
+        const { data, error } = await supabase
+          .from('quotes')
+          .select('id, quote_number, service, total_inc_gst, created_at')
+          .eq('lead_id', lead.id)
+          .order('created_at', { ascending: false })
+
+        if (error) throw error
+        setQuotes(data || [])
+
+        // Auto-select the most recent quote if available
+        if (data && data.length > 0 && !selectedQuoteId) {
+          setSelectedQuoteId(data[0].id)
+        }
+      } catch (err) {
+        console.error('Failed to load quotes:', err)
+        setError('Failed to load available quotes')
+      } finally {
+        setLoadingQuotes(false)
+      }
+    }
+
+    loadQuotes()
+  }, [lead.id, selectedQuoteId])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
@@ -285,8 +342,15 @@ export default function BookingModal({ lead, onClose, onSuccess, onSkip }: Booki
     try {
       const startsAt = new Date(`${date}T${time}:00`)
       
+      if (!selectedQuoteId) {
+        setError('Please select a quote')
+        setIsSubmitting(false)
+        return
+      }
+
       const payload: CreateBookingPayload = {
         leadId: lead.id,
+        quoteId: selectedQuoteId,
         startsAt: startsAt.toISOString(),
         durationMinutes: duration,
         repeatType,
@@ -393,6 +457,57 @@ export default function BookingModal({ lead, onClose, onSuccess, onSkip }: Booki
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-5 space-y-5 overflow-y-auto max-h-[60vh]">
+          {/* Quote Selection */}
+          <div>
+            <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">
+              Quote *
+            </label>
+            {loadingQuotes ? (
+              <div className="flex items-center gap-2 text-sm text-gray-400">
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Loading quotes...
+              </div>
+            ) : quotes.length === 0 ? (
+              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                No quotes found for this lead. Please create a quote first.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {quotes.map((quote) => (
+                  <label
+                    key={quote.id}
+                    className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                      selectedQuoteId === quote.id
+                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                        : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="quote"
+                      value={quote.id}
+                      checked={selectedQuoteId === quote.id}
+                      onChange={(e) => setSelectedQuoteId(e.target.value)}
+                      required
+                      className="text-emerald-500 focus:ring-emerald-500/50"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium">
+                        {quote.quote_number || 'Quote'} - {quote.service || 'Service'}
+                      </div>
+                      <div className="text-xs opacity-70">
+                        ${quote.total_inc_gst?.toFixed(2) || 'N/A'} inc GST • {new Date(quote.created_at).toLocaleDateString()}
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Date & Time Row */}
           <div className="grid grid-cols-2 gap-4">
             <div>

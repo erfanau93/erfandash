@@ -295,6 +295,47 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
     })
   }
 
+  // Proactively push quote address/coords + quote link onto any booking for this lead.
+  const syncQuoteToBooking = useCallback(async (quote: QuoteRecord | null) => {
+    if (!quote?.id || !quote.lead_id) return
+    try {
+      const { data: seriesRows, error: seriesErr } = await supabase
+        .from('booking_series')
+        .select('id, quote_id, status, created_at')
+        .eq('lead_id', quote.lead_id)
+        .order('created_at', { ascending: false })
+
+      if (seriesErr || !seriesRows || seriesRows.length === 0) return
+
+      const rows = seriesRows as any[]
+      // Prefer the series already linked to this quote, otherwise the newest active (non-cancelled),
+      // otherwise (single booking per lead) the only series.
+      const target =
+        rows.find((s) => s.quote_id === quote.id) ||
+        rows.find((s) => !s.quote_id && s.status !== 'cancelled') ||
+        (rows.length === 1 ? rows[0] : null)
+
+      if (!target?.id) return
+
+      const hasLatLng = typeof quote.address_lat === 'number' && typeof quote.address_lng === 'number'
+      // Avoid unnecessary round-trips if nothing would change.
+      if (target.quote_id === quote.id && !quote.address && !hasLatLng) return
+
+      const updatePayload: Record<string, any> = { quote_id: quote.id }
+      if (quote.address) {
+        updatePayload.service_address = quote.address
+      }
+      if (hasLatLng) {
+        updatePayload.service_lat = quote.address_lat
+        updatePayload.service_lng = quote.address_lng
+      }
+
+      await supabase.from('booking_series').update(updatePayload).eq('id', target.id)
+    } catch (err) {
+      console.warn('Quote save: failed to sync booking address/quote link', err)
+    }
+  }, [])
+
   // Clamp numeric values to prevent database overflow
   // numeric(10,2) max = 99999999.99, numeric(6,2) max = 9999.99, numeric(5,2) max = 999.99
   const clampValue = (val: number, max: number) => Math.min(Math.max(0, val), max)
@@ -397,6 +438,9 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
           console.error('Failed to update extracted lead contact info', leadErr)
         }
       }
+
+      // Keep the booking in sync with this quote (address + explicit quote link)
+      await syncQuoteToBooking(saved)
 
       setQuotes((prev) => {
         if (editingQuoteId && saved) {

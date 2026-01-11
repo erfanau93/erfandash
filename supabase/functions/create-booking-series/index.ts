@@ -22,6 +22,7 @@ type RepeatType = 'none' | 'weekly' | 'fortnightly' | '3-weekly' | 'monthly' | '
 
 interface CreateBookingPayload {
   leadId: string
+  quoteId: string
   startsAt: string
   durationMinutes?: number
   repeatType?: RepeatType
@@ -146,6 +147,9 @@ Deno.serve(async (req) => {
   if (!payload.leadId) {
     return jsonResponse({ error: 'leadId is required' }, 400)
   }
+  if (!payload.quoteId) {
+    return jsonResponse({ error: 'quoteId is required' }, 400)
+  }
   if (!payload.startsAt) {
     return jsonResponse({ error: 'startsAt is required' }, 400)
   }
@@ -187,11 +191,24 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'Lead not found' }, 404)
     }
 
-    // 2. Create the booking series
+    // 2. Verify the quote exists and belongs to the lead
+    const { data: quote, error: quoteError } = await supabase
+      .from('quotes')
+      .select('id, lead_id')
+      .eq('id', payload.quoteId)
+      .eq('lead_id', payload.leadId)
+      .single()
+
+    if (quoteError || !quote) {
+      return jsonResponse({ error: 'Quote not found or does not belong to this lead' }, 404)
+    }
+
+    // 3. Create the booking series
     const { data: series, error: seriesError } = await supabase
       .from('booking_series')
       .insert({
         lead_id: payload.leadId,
+        quote_id: payload.quoteId,
         title,
         timezone,
         starts_at: startDate.toISOString(),

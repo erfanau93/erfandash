@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { supabase, type DialpadCall, type DialpadSms, type DialpadEmail } from '../lib/supabase'
+import { supabase, supabaseUrl, supabaseAnonKey, type DialpadCall, type DialpadSms, type DialpadEmail } from '../lib/supabase'
 import DatePicker from './DatePicker'
 import DayComparisonChart from './DayComparisonChart'
 import HourlyActivity from './HourlyActivity'
@@ -10,8 +10,7 @@ import SmsLead from './SmsLead'
 import BookingModal from './BookingModal'
 import { subDays } from 'date-fns'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://etiaoqskgplpfydblzne.supabase.co'
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV0aWFvcXNrZ3BscGZ5ZGJsem5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcyMzI0NzAsImV4cCI6MjA4MjgwODQ3MH0.c-AlsveEx_bxVgEivga3PRrBp5ylY3He9EJXbaa2N2c'
+// Supabase client uses VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY internally.
 const dialpadUserId = '6452247499866112'
 const dialpadUrl = `https://dialpad.com/api/v2/users/${dialpadUserId}/initiate_call`
 const dialpadToken =
@@ -50,7 +49,7 @@ interface ExtractedLead {
   last_text_body?: string | null
 }
 
-const LEAD_STATUS_OPTIONS = ['Unanswered', 'Quote Sent', 'Job Won', 'Not interested', 'Follow Up']
+const LEAD_STATUS_OPTIONS = ['Unanswered', 'Quote Sent', 'Job Won', 'Jobs Completed', 'Not interested', 'Follow Up']
 
 const LEAD_STATUS_STYLES: Record<
   string,
@@ -73,6 +72,12 @@ const LEAD_STATUS_STYLES: Record<
     border: 'border-emerald-400/40',
     pillBg: 'bg-emerald-500/20',
     pillText: 'text-emerald-100',
+  },
+  'Jobs Completed': {
+    bg: 'bg-teal-500/5',
+    border: 'border-teal-400/40',
+    pillBg: 'bg-teal-500/20',
+    pillText: 'text-teal-100',
   },
   'Not interested': {
     bg: 'bg-slate-500/5',
@@ -704,19 +709,22 @@ export default function Dashboard() {
     }
   }
 
-  const handleUpdateLeadStatus = async (leadId: string, status: string, skipBookingPrompt = false) => {
+  const handleUpdateLeadStatus = async (leadId: string, status: string | null, skipBookingPrompt = false) => {
+    const lead = extractedLeads.find((l) => l.id === leadId)
+    const previousStatus = lead?.status || ''
+
     // If changing to "Job Won", show booking modal first (unless skipping)
-    if (status === 'Job Won' && !skipBookingPrompt) {
-      const lead = extractedLeads.find((l) => l.id === leadId)
-      if (lead) {
-        setPendingJobWonLead(lead)
-        return
-      }
+    if (status === 'Job Won' && !skipBookingPrompt && lead) {
+      setPendingJobWonLead(lead)
+      return
     }
 
     try {
       setLeadStatusError(null)
       setSavingStatusId(leadId)
+
+      // Optimistic update to match Sales Funnel behaviour
+      setExtractedLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status: status || null } : l)))
 
       const response = await fetch(`${supabaseUrl}/functions/v1/update-lead-status`, {
         method: 'POST',
@@ -728,16 +736,26 @@ export default function Dashboard() {
         body: JSON.stringify({ leadId, status }),
       })
 
-      const result = await response.json()
-      if (!response.ok || result?.error) {
-        const details = result?.error || 'Failed to update lead status'
-        throw new Error(details)
+      let result: any = {}
+      try {
+        result = await response.json()
+      } catch (jsonError) {
+        const text = await response.text().catch(() => 'Unknown error')
+        throw new Error(`Server error (${response.status}): ${text || 'Invalid response format'}`)
       }
 
-      setExtractedLeads((prev) => prev.map((lead) => (lead.id === leadId ? { ...lead, status } : lead)))
+      if (!response.ok || result?.error) {
+        const details = result?.error || `HTTP ${response.status}: Failed to update lead status`
+        console.error('Update lead status error:', { httpStatus: response.status, result, leadId, newStatus: status })
+        throw new Error(details)
+      }
     } catch (err) {
       console.error('Error updating lead status:', err)
-      setLeadStatusError(err instanceof Error ? err.message : 'Failed to update lead status')
+      const errorMessage = err instanceof Error ? err.message : 'Failed to update lead status'
+      setLeadStatusError(errorMessage)
+      // Revert on error
+      setExtractedLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status: previousStatus || null } : l)))
+      fetchMetrics()
     } finally {
       setSavingStatusId(null)
     }
@@ -1564,7 +1582,10 @@ export default function Dashboard() {
                         <span className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider">Status</span>
                         <select
                           value={lead.status || ''}
-                          onChange={(e) => handleUpdateLeadStatus(lead.id, e.target.value)}
+                          onChange={(e) => {
+                            const nextStatus = e.target.value || null
+                            handleUpdateLeadStatus(lead.id, nextStatus)
+                          }}
                           disabled={savingStatusId === lead.id}
                           className="bg-[var(--color-surface-light)] text-white text-xs rounded-lg px-2 py-1 border border-white/10 focus:outline-none focus:ring-1 focus:ring-emerald-400"
                         >
@@ -1693,7 +1714,7 @@ export default function Dashboard() {
               </button>
             </div>
             <div className="p-4">
-              <QuoteTool lead={quoteLead} emailId={quoteLead.email_id ?? null} />
+              <QuoteTool lead={quoteLead} emailId={quoteLead.email_id ?? null} autoEditLatest />
             </div>
           </div>
         </div>

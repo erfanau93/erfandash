@@ -25,6 +25,7 @@ type BookingOccurrence = {
     id: string
     title: string
     lead_id: string
+    quote_id?: string | null
     service_address: string | null
     service_lat: number | null
     service_lng: number | null
@@ -340,7 +341,7 @@ export default function Dispatch() {
           .from('booking_occurrences')
           .select(
             `id, series_id, start_at, end_at, status, cleaner_id,
-             series:booking_series(id, title, lead_id, service_address, service_lat, service_lng, lead:extracted_leads(id, name))`
+             series:booking_series(id, title, lead_id, quote_id, service_address, service_lat, service_lng, lead:extracted_leads(id, name))`
           )
           .gte('start_at', rangeStart.toISOString())
           .lt('start_at', rangeEnd.toISOString())
@@ -354,16 +355,41 @@ export default function Dispatch() {
       const jobList = (jobsData || []) as any[]
       setJobs(jobList as any)
 
-      // Quote pins: use latest quote coords per lead (preferred source for job map pins).
-      const leadIds = Array.from(new Set(jobList.map((j) => j?.series?.lead_id).filter(Boolean))) as string[]
-      if (leadIds.length) {
+      // Quote pins: use the quote explicitly linked to each booking; fallback to latest quote only for legacy bookings without quote_id.
+      const quoteIds = Array.from(new Set(jobList.map((j) => j?.series?.quote_id).filter(Boolean))) as string[]
+      const quoteById: Record<string, { address: string | null; lat: number | null; lng: number | null; lead_id: string | null }> = {}
+      if (quoteIds.length) {
+        const { data: quotes, error: qErr } = await supabase
+          .from('quotes')
+          .select('id, lead_id, address, address_lat, address_lng')
+          .in('id', quoteIds)
+        if (!qErr && quotes) {
+          for (const q of quotes as any[]) {
+            quoteById[q.id] = {
+              address: q.address ?? null,
+              lat: typeof q.address_lat === 'number' ? q.address_lat : null,
+              lng: typeof q.address_lng === 'number' ? q.address_lng : null,
+              lead_id: q.lead_id ?? null,
+            }
+          }
+        }
+      }
+
+      const fallbackLeadIds = Array.from(
+        new Set(
+          jobList
+            .map((j) => (!j?.series?.quote_id ? j?.series?.lead_id : null))
+            .filter(Boolean)
+        )
+      ) as string[]
+      const latestByLead: Record<string, { address: string | null; lat: number | null; lng: number | null }> = {}
+      if (fallbackLeadIds.length) {
         const { data: quotes, error: qErr } = await supabase
           .from('quotes')
           .select('lead_id, address, address_lat, address_lng, created_at')
-          .in('lead_id', leadIds)
+          .in('lead_id', fallbackLeadIds)
           .order('created_at', { ascending: false })
         if (!qErr && quotes) {
-          const latestByLead: Record<string, { address: string | null; lat: number | null; lng: number | null }> = {}
           for (const q of quotes as any[]) {
             const lid = q.lead_id as string
             if (!lid || latestByLead[lid]) continue
@@ -373,13 +399,26 @@ export default function Dispatch() {
               lng: typeof q.address_lng === 'number' ? q.address_lng : null,
             }
           }
-          setQuotePins(latestByLead)
-        } else {
-          setQuotePins({})
         }
-      } else {
-        setQuotePins({})
       }
+
+      const pins: Record<string, { address: string | null; lat: number | null; lng: number | null }> = {}
+      for (const j of jobList) {
+        const sid = j?.series?.id
+        if (!sid) continue
+        const linked = j?.series?.quote_id ? quoteById[j.series.quote_id] : null
+        const fallback = j?.series?.lead_id ? latestByLead[j.series.lead_id] : null
+        const address = linked?.address ?? fallback?.address ?? j?.series?.service_address ?? null
+        const lat = linked?.lat ?? fallback?.lat ?? j?.series?.service_lat ?? null
+        const lng = linked?.lng ?? fallback?.lng ?? j?.series?.service_lng ?? null
+        pins[sid] = {
+          address,
+          lat: typeof lat === 'number' ? lat : null,
+          lng: typeof lng === 'number' ? lng : null,
+        }
+      }
+
+      setQuotePins(pins)
     } catch (e: any) {
       setError(e?.message || 'Failed to load dispatch data')
     }
@@ -397,8 +436,8 @@ export default function Dispatch() {
 
     // Add job markers
     for (const j of jobs) {
-      const leadId = j.series?.lead_id
-      const quotePin = leadId ? quotePins[leadId] : null
+      const seriesId = j.series?.id
+      const quotePin = seriesId ? quotePins[seriesId] : null
       const lat = quotePin?.lat ?? j.series?.service_lat
       const lng = quotePin?.lng ?? j.series?.service_lng
       if (typeof lat === 'number' && typeof lng === 'number') {
@@ -714,8 +753,8 @@ export default function Dispatch() {
                   <div className="p-3 text-sm text-[var(--color-text-muted)]">No unassigned jobs.</div>
                 ) : (
                   jobsUnassigned.map((j) => {
-                    const leadId = j.series?.lead_id
-                    const quotePin = leadId ? quotePins[leadId] : null
+                    const seriesId = j.series?.id
+                    const quotePin = seriesId ? quotePins[seriesId] : null
                     const pinLat = quotePin?.lat ?? j.series?.service_lat
                     const pinLng = quotePin?.lng ?? j.series?.service_lng
                     const hasCoords = typeof pinLat === 'number' && typeof pinLng === 'number'
@@ -813,8 +852,8 @@ export default function Dispatch() {
                   <div className="p-3 text-sm text-[var(--color-text-muted)]">No assigned jobs.</div>
                 ) : (
                   jobsAssigned.map((j) => {
-                    const leadId = j.series?.lead_id
-                    const quotePin = leadId ? quotePins[leadId] : null
+                    const seriesId = j.series?.id
+                    const quotePin = seriesId ? quotePins[seriesId] : null
                     const pinLat = quotePin?.lat ?? j.series?.service_lat
                     const pinLng = quotePin?.lng ?? j.series?.service_lng
                     const hasCoords = typeof pinLat === 'number' && typeof pinLng === 'number'

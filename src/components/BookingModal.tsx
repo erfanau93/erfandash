@@ -621,7 +621,9 @@ export default function BookingModal({ lead, onClose, onSuccess, onSkip }: Booki
                     setShowSuccess(false)
                     setTimeout(() => {
                       // Call success callback after popup is dismissed
-                      onSuccess?.(seriesId)
+                      if (seriesId) {
+                        onSuccess?.(seriesId)
+                      }
                       onClose()
                     }, 300)
                   }}

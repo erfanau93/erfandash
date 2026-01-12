@@ -136,7 +136,26 @@ function LeadModal({ email, onClose, onExtracted }: LeadModalProps) {
           .order('start_at', { ascending: true })
 
         if (error) throw error
-        setTodayJobs((data || []) as LeadJob[])
+
+        // Supabase returns series as an array; normalize to the expected single object
+        const normalizedJobs: LeadJob[] = (data || []).map((job: any) => {
+          const seriesData = Array.isArray(job.series) ? job.series[0] : job.series
+
+          return {
+            id: String(job.id),
+            start_at: job.start_at,
+            end_at: job.end_at,
+            status: job.status as LeadJobStatus,
+            series: seriesData
+              ? {
+                  id: String(seriesData.id),
+                  title: seriesData.title ?? null,
+                }
+              : null,
+          }
+        })
+
+        setTodayJobs(normalizedJobs)
       } catch (err: any) {
         console.error('Error loading today jobs', err)
         setJobsError(err?.message || 'Could not load today’s jobs')

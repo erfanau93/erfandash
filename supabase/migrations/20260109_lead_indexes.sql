@@ -5,3 +5,7 @@ create index if not exists extracted_leads_email_id_idx on public.extracted_lead
 create index if not exists extracted_leads_created_at_idx on public.extracted_leads (created_at desc);
 
 
+
+
+
+

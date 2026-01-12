@@ -61,3 +61,7 @@ AFTER INSERT OR UPDATE ON quotes
 FOR EACH ROW
 EXECUTE FUNCTION sync_booking_series_from_quote();
 
+
+
+
+

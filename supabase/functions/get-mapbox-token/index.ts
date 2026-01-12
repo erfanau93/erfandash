@@ -34,3 +34,7 @@ Deno.serve((req) => {
   return jsonResponse({ token: MAPBOX_TOKEN })
 })
 
+
+
+
+

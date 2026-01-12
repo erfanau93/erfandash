@@ -7,3 +7,7 @@ ALTER TABLE booking_series
 CREATE INDEX IF NOT EXISTS idx_booking_series_quote_id ON booking_series(quote_id);
 
 
+
+
+
+

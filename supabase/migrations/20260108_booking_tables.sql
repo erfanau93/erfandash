@@ -122,3 +122,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE booking_occurrences;
 
 
 
+
+
+
+

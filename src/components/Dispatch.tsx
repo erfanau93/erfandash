@@ -33,6 +33,18 @@ type BookingOccurrence = {
   }
 }
 
+type QuotePin = {
+  address: string | null
+  lat: number | null
+  lng: number | null
+  total_inc_gst: number | null
+}
+
+type CleanerReviewStat = {
+  avg: number | null
+  count: number
+}
+
 // NOTE: This uses Dialpad directly from the browser (same approach as other parts of this app).
 // If CORS blocks it, we can switch to an Edge Function proxy.
 const DIALPAD_SMS_ENDPOINT = 'https://dialpad.com/api/v2/sms'
@@ -73,6 +85,32 @@ function addMonths(date: Date, months: number) {
   const d = new Date(date)
   d.setMonth(d.getMonth() + months)
   return d
+}
+
+// Calculate distance between two points using Haversine formula
+function calculateDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371 // Earth's radius in kilometers
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLng = (lng2 - lng1) * Math.PI / 180
+  const a =
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng/2) * Math.sin(dLng/2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+  return R * c
+}
+
+// Format distance for display
+function formatDistance(km: number): string {
+  if (km < 1) {
+    return `${Math.round(km * 1000)}m`
+  }
+  return `${km.toFixed(1)}km`
+}
+
+function formatCurrency(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) return null
+  return `$${Number(value).toFixed(2)}`
 }
 
 export default function Dispatch() {
@@ -135,16 +173,37 @@ export default function Dispatch() {
     completedJobs: { id: string; start_at: string; series_title: string | null; lead_name: string | null }[]
   } | null>(null)
 
+  // Map highlighting state
+  const [highlightedJobId, setHighlightedJobId] = useState<string | null>(null)
+  const [highlightedCleanerId, setHighlightedCleanerId] = useState<string | null>(null)
+
   const activeCleaners = useMemo(() => cleaners.filter((c) => c.active !== false), [cleaners])
   const jobsUnassigned = useMemo(() => jobs.filter((j) => !j.cleaner_id), [jobs])
   const jobsAssigned = useMemo(() => jobs.filter((j) => Boolean(j.cleaner_id)), [jobs])
 
-  const [quotePins, setQuotePins] = useState<Record<string, { address: string | null; lat: number | null; lng: number | null }>>(
-    {}
-  )
+  const [quotePins, setQuotePins] = useState<Record<string, QuotePin>>({})
 
   const [pickerOpenFor, setPickerOpenFor] = useState<string | null>(null)
   const [pickerQuery, setPickerQuery] = useState('')
+  const [cleanerReviewStats, setCleanerReviewStats] = useState<Record<string, CleanerReviewStat>>({})
+  const [selectedLocation, setSelectedLocation] = useState<{ label: string; lat: number; lng: number } | null>(null)
+  const [locationQuery, setLocationQuery] = useState('')
+  const [locationResults, setLocationResults] = useState<{ place_name: string; center: [number, number] | undefined }[]>([])
+  const [isLocationSearching, setIsLocationSearching] = useState(false)
+  const [cleanerSort, setCleanerSort] = useState<'distance' | 'reviews' | 'availability'>('distance')
+  const [cleanerNameFilter, setCleanerNameFilter] = useState('')
+  const [cleanerPage, setCleanerPage] = useState(1)
+  const CLEANER_PAGE_SIZE = 6
+
+  const [unassignedSort, setUnassignedSort] = useState<'due_asc' | 'due_desc' | 'cost_high' | 'cost_low'>('due_asc')
+  const [assignedSort, setAssignedSort] = useState<'due_asc' | 'due_desc' | 'cost_high' | 'cost_low'>('due_asc')
+  const [unassignedPage, setUnassignedPage] = useState(1)
+  const [assignedPage, setAssignedPage] = useState(1)
+  const JOB_PAGE_SIZE = 6
+
+  const [bulkSearch, setBulkSearch] = useState('')
+  const [bulkPage, setBulkPage] = useState(1)
+  const BULK_PAGE_SIZE = 8
 
   useEffect(() => {
     fetchMapboxToken()
@@ -162,6 +221,47 @@ export default function Dispatch() {
     if (!mapboxToken) return
     ;(mapboxgl as any).accessToken = mapboxToken
   }, [mapboxToken])
+
+  useEffect(() => {
+    if (!mapboxToken) return
+    if (!locationQuery || locationQuery.trim().length < 3) {
+      setLocationResults([])
+      setIsLocationSearching(false)
+      return
+    }
+
+    const controller = new AbortController()
+    const timer = setTimeout(async () => {
+      setIsLocationSearching(true)
+      try {
+        const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
+          locationQuery.trim()
+        )}.json?access_token=${mapboxToken}&autocomplete=true&limit=5&country=AU`
+        const res = await fetch(url, { signal: controller.signal })
+        const data = await res.json().catch(() => ({}))
+        const suggestions =
+          data?.features
+            ?.map((f: any) => ({
+              place_name: f?.place_name as string,
+              center: f?.center as [number, number] | undefined, // [lng, lat]
+            }))
+            .filter((x: any) => typeof x?.place_name === 'string' && x.place_name.length > 0) || []
+        setLocationResults(suggestions)
+      } catch (err) {
+        if ((err as any)?.name !== 'AbortError') {
+          console.error('Mapbox location search failed', err)
+          setLocationResults([])
+        }
+      } finally {
+        setIsLocationSearching(false)
+      }
+    }, 250)
+
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [locationQuery, mapboxToken])
 
   useEffect(() => {
     if (!mapboxToken) return
@@ -213,6 +313,67 @@ export default function Dispatch() {
     markersRef.current = []
   }
 
+  // Highlight and pan/zoom to a job on the map
+  const highlightJobOnMap = (jobId: string) => {
+    const map = mapRef.current
+    if (!map) return
+
+    const job = jobs.find(j => j.id === jobId)
+    if (!job) return
+
+    const seriesId = job.series?.id
+    const quotePin = seriesId ? quotePins[seriesId] : null
+    const lat = quotePin?.lat ?? job.series?.service_lat
+    const lng = quotePin?.lng ?? job.series?.service_lng
+
+    if (typeof lat === 'number' && typeof lng === 'number') {
+      // Clear previous highlights
+      setHighlightedJobId(null)
+      setHighlightedCleanerId(null)
+
+      // Set new highlight
+      setHighlightedJobId(jobId)
+
+      // Pan and zoom to the job location with smooth animation
+      map.flyTo({
+        center: [lng, lat],
+        zoom: 16,
+        duration: 1200,
+        easing: (t) => t * (2 - t) // ease-out quadratic
+      })
+
+      // Clear highlight after animation with a longer duration for better visibility
+      setTimeout(() => setHighlightedJobId(null), 4000)
+    }
+  }
+
+  // Highlight and center on a cleaner on the map
+  const highlightCleanerOnMap = (cleanerId: string) => {
+    const map = mapRef.current
+    if (!map) return
+
+    const cleaner = cleaners.find(c => c.id === cleanerId)
+    if (!cleaner || typeof cleaner.base_lat !== 'number' || typeof cleaner.base_lng !== 'number') return
+
+    // Clear previous highlights
+    setHighlightedJobId(null)
+    setHighlightedCleanerId(null)
+
+    // Set new highlight
+    setHighlightedCleanerId(cleanerId)
+
+    // Pan and zoom to the cleaner location with smooth animation
+    map.flyTo({
+      center: [cleaner.base_lng, cleaner.base_lat],
+      zoom: 16,
+      duration: 1200,
+      easing: (t) => t * (2 - t) // ease-out quadratic
+    })
+
+    // Clear highlight after animation with a longer duration for better visibility
+    setTimeout(() => setHighlightedCleanerId(null), 4000)
+  }
+
   const addJobMarker = (
     job: BookingOccurrence,
     lng: number,
@@ -233,6 +394,15 @@ export default function Dispatch() {
     el.style.background = assigned ? 'rgba(34,197,94,0.85)' : 'rgba(249,115,22,0.85)'
     el.style.cursor = 'pointer'
     el.title = label
+
+    // Add highlight animation if this job is highlighted
+    if (highlightedJobId === job.id) {
+      el.style.animation = 'pulse-glow 1.5s ease-in-out infinite alternate'
+      el.style.transform = 'scale(2.2)'
+      el.style.boxShadow = '0 0 30px rgba(34,197,94,0.9), 0 0 60px rgba(34,197,94,0.6), 0 0 90px rgba(34,197,94,0.3)'
+      el.style.borderWidth = '3px'
+      el.style.zIndex = '1000'
+    }
 
     // Rich popup content so users can see/launch the job directly
     const popupContent = document.createElement('div')
@@ -311,11 +481,41 @@ export default function Dispatch() {
       setCleanerModalId(cleaner.id)
     }
 
+    // Add highlight animation if this cleaner is highlighted
+    if (highlightedCleanerId === cleaner.id) {
+      el.style.animation = 'pulse-glow 1.5s ease-in-out infinite alternate'
+      el.style.transform = 'scale(2.2)'
+      el.style.boxShadow = '0 0 30px rgba(168,85,247,0.9), 0 0 60px rgba(168,85,247,0.6), 0 0 90px rgba(168,85,247,0.3)'
+      el.style.borderWidth = '3px'
+      el.style.zIndex = '1000'
+    }
+
     const marker = new mapboxgl.Marker({ element: el })
       .setLngLat([cleaner.base_lng, cleaner.base_lat])
       .addTo(map)
 
     markersRef.current.push(marker)
+  }
+
+  const getJobCost = (job: BookingOccurrence): number | null => {
+    const seriesId = job.series?.id
+    const pin = seriesId ? quotePins[seriesId] : null
+    return typeof pin?.total_inc_gst === 'number' ? pin.total_inc_gst : null
+  }
+
+  const compareJobs = (a: BookingOccurrence, b: BookingOccurrence, sort: typeof unassignedSort) => {
+    if (sort === 'cost_high' || sort === 'cost_low') {
+      const aCost = getJobCost(a)
+      const bCost = getJobCost(b)
+      if (aCost !== null && bCost !== null) {
+        return sort === 'cost_high' ? bCost - aCost : aCost - bCost
+      }
+      if (aCost !== null) return -1
+      if (bCost !== null) return 1
+    }
+    const aDate = new Date(a.start_at).getTime()
+    const bDate = new Date(b.start_at).getTime()
+    return sort === 'due_desc' ? bDate - aDate : aDate - bDate
   }
 
   const loadData = async () => {
@@ -332,7 +532,11 @@ export default function Dispatch() {
           ? addDays(rangeStart, 7)
           : addDays(rangeStart, 1)
 
-      const [{ data: cleanersData, error: cleanersErr }, { data: jobsData, error: jobsErr }] = await Promise.all([
+      const [
+        { data: cleanersData, error: cleanersErr },
+        { data: jobsData, error: jobsErr },
+        { data: reviewStats, error: reviewStatsErr },
+      ] = await Promise.all([
         supabase
           .from('cleaners')
           .select('id, full_name, phone, base_location_text, base_lat, base_lng, active')
@@ -347,21 +551,47 @@ export default function Dispatch() {
           .lt('start_at', rangeEnd.toISOString())
           .neq('status', 'cancelled')
           .order('start_at', { ascending: true }),
+        supabase
+          .from('cleaner_job_reviews')
+          .select('cleaner_id, avg_rating:avg(rating), review_count:count(id)')
+          // Aggregates automatically group by non-aggregate columns in PostgREST
+          .order('cleaner_id'),
       ])
 
       if (cleanersErr) throw cleanersErr
       if (jobsErr) throw jobsErr
+      if (reviewStatsErr) {
+        console.warn('Failed to load cleaner review stats', reviewStatsErr)
+      }
       setCleaners((cleanersData || []) as any)
       const jobList = (jobsData || []) as any[]
       setJobs(jobList as any)
 
+      if (reviewStats && Array.isArray(reviewStats)) {
+        const stats: Record<string, CleanerReviewStat> = {}
+        for (const row of reviewStats as any[]) {
+          const cid = row?.cleaner_id as string | undefined
+          if (!cid) continue
+          stats[cid] = {
+            avg: typeof row?.avg_rating === 'number' ? row.avg_rating : null,
+            count: typeof row?.review_count === 'number' ? row.review_count : 0,
+          }
+        }
+        setCleanerReviewStats(stats)
+      } else {
+        setCleanerReviewStats({})
+      }
+
       // Quote pins: use the quote explicitly linked to each booking; fallback to latest quote only for legacy bookings without quote_id.
       const quoteIds = Array.from(new Set(jobList.map((j) => j?.series?.quote_id).filter(Boolean))) as string[]
-      const quoteById: Record<string, { address: string | null; lat: number | null; lng: number | null; lead_id: string | null }> = {}
+      const quoteById: Record<
+        string,
+        { address: string | null; lat: number | null; lng: number | null; lead_id: string | null; total_inc_gst: number | null }
+      > = {}
       if (quoteIds.length) {
         const { data: quotes, error: qErr } = await supabase
           .from('quotes')
-          .select('id, lead_id, address, address_lat, address_lng')
+          .select('id, lead_id, address, address_lat, address_lng, total_inc_gst')
           .in('id', quoteIds)
         if (!qErr && quotes) {
           for (const q of quotes as any[]) {
@@ -370,6 +600,7 @@ export default function Dispatch() {
               lat: typeof q.address_lat === 'number' ? q.address_lat : null,
               lng: typeof q.address_lng === 'number' ? q.address_lng : null,
               lead_id: q.lead_id ?? null,
+              total_inc_gst: typeof q.total_inc_gst === 'number' ? q.total_inc_gst : null,
             }
           }
         }
@@ -382,11 +613,12 @@ export default function Dispatch() {
             .filter(Boolean)
         )
       ) as string[]
-      const latestByLead: Record<string, { address: string | null; lat: number | null; lng: number | null }> = {}
+      const latestByLead: Record<string, { address: string | null; lat: number | null; lng: number | null; total_inc_gst: number | null }> =
+        {}
       if (fallbackLeadIds.length) {
         const { data: quotes, error: qErr } = await supabase
           .from('quotes')
-          .select('lead_id, address, address_lat, address_lng, created_at')
+          .select('lead_id, address, address_lat, address_lng, created_at, total_inc_gst')
           .in('lead_id', fallbackLeadIds)
           .order('created_at', { ascending: false })
         if (!qErr && quotes) {
@@ -397,12 +629,13 @@ export default function Dispatch() {
               address: q.address ?? null,
               lat: typeof q.address_lat === 'number' ? q.address_lat : null,
               lng: typeof q.address_lng === 'number' ? q.address_lng : null,
+              total_inc_gst: typeof q.total_inc_gst === 'number' ? q.total_inc_gst : null,
             }
           }
         }
       }
 
-      const pins: Record<string, { address: string | null; lat: number | null; lng: number | null }> = {}
+      const pins: Record<string, QuotePin> = {}
       for (const j of jobList) {
         const sid = j?.series?.id
         if (!sid) continue
@@ -415,6 +648,9 @@ export default function Dispatch() {
           address,
           lat: typeof lat === 'number' ? lat : null,
           lng: typeof lng === 'number' ? lng : null,
+          total_inc_gst: typeof (linked?.total_inc_gst ?? fallback?.total_inc_gst) === 'number'
+            ? (linked?.total_inc_gst ?? fallback?.total_inc_gst ?? null)
+            : null,
         }
       }
 
@@ -428,6 +664,22 @@ export default function Dispatch() {
     loadData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate, viewMode])
+
+  useEffect(() => {
+    setUnassignedPage(1)
+  }, [unassignedSort, jobsUnassigned.length])
+
+  useEffect(() => {
+    setAssignedPage(1)
+  }, [assignedSort, jobsAssigned.length])
+
+  useEffect(() => {
+    setCleanerPage(1)
+  }, [cleanerSort, cleanerNameFilter, selectedLocation, activeCleaners.length])
+
+  useEffect(() => {
+    setBulkPage(1)
+  }, [bulkSearch, activeCleaners.length])
 
   useEffect(() => {
     const map = mapRef.current
@@ -453,7 +705,132 @@ export default function Dispatch() {
         addCleanerMarker(c)
       }
     }
-  }, [jobs, activeCleaners, showCleaners, quotePins, cleaners])
+  }, [jobs, activeCleaners, showCleaners, quotePins, cleaners, highlightedJobId, highlightedCleanerId])
+
+  const decoratedCleaners = useMemo(
+    () =>
+      activeCleaners.map((cleaner) => {
+        const currentJobs = jobsAssigned.filter((j) => j.cleaner_id === cleaner.id)
+        const isAvailable = currentJobs.length === 0
+        const hasValidCoords = typeof cleaner.base_lat === 'number' && typeof cleaner.base_lng === 'number'
+
+        let nearestJobDistance: number | null = null
+        let nearestJob: BookingOccurrence | null = null
+        if (hasValidCoords) {
+          for (const job of jobs) {
+            const seriesId = job.series?.id
+            const quotePin = seriesId ? quotePins[seriesId] : null
+            const jobLat = quotePin?.lat ?? job.series?.service_lat
+            const jobLng = quotePin?.lng ?? job.series?.service_lng
+
+            if (typeof jobLat === 'number' && typeof jobLng === 'number') {
+              const distance = calculateDistance(cleaner.base_lat!, cleaner.base_lng!, jobLat, jobLng)
+              if (nearestJobDistance === null || distance < nearestJobDistance) {
+                nearestJobDistance = distance
+                nearestJob = job
+              }
+            }
+          }
+        }
+
+        const stats = cleanerReviewStats[cleaner.id] || { avg: null, count: 0 }
+        const distanceToSearch =
+          selectedLocation && hasValidCoords
+            ? calculateDistance(cleaner.base_lat!, cleaner.base_lng!, selectedLocation.lat, selectedLocation.lng)
+            : null
+
+        return {
+          cleaner,
+          currentJobs,
+          isAvailable,
+          hasValidCoords,
+          nearestJobDistance,
+          nearestJob,
+          reviewAvg: stats.avg,
+          reviewCount: stats.count,
+          distanceToSearch,
+        }
+      }),
+    [activeCleaners, jobsAssigned, jobs, quotePins, cleanerReviewStats, selectedLocation]
+  )
+
+  const filteredCleaners = useMemo(() => {
+    const query = cleanerNameFilter.trim().toLowerCase()
+    if (!query) return decoratedCleaners
+    return decoratedCleaners.filter((item) => item.cleaner.full_name.toLowerCase().includes(query))
+  }, [decoratedCleaners, cleanerNameFilter])
+
+  const sortedCleaners = useMemo(() => {
+    const list = [...filteredCleaners]
+    if (cleanerSort === 'distance' && selectedLocation) {
+      return list.sort((a, b) => {
+        const aD = a.distanceToSearch
+        const bD = b.distanceToSearch
+        if (aD !== null && bD !== null) return aD - bD
+        if (aD !== null) return -1
+        if (bD !== null) return 1
+        return a.cleaner.full_name.localeCompare(b.cleaner.full_name)
+      })
+    }
+    if (cleanerSort === 'reviews') {
+      return list.sort((a, b) => {
+        const aAvg = a.reviewAvg ?? 0
+        const bAvg = b.reviewAvg ?? 0
+        if (bAvg !== aAvg) return bAvg - aAvg
+        return (b.reviewCount ?? 0) - (a.reviewCount ?? 0)
+      })
+    }
+    return list.sort((a, b) => {
+      if (a.isAvailable && !b.isAvailable) return -1
+      if (!a.isAvailable && b.isAvailable) return 1
+      if (a.nearestJobDistance !== null && b.nearestJobDistance !== null) {
+        return a.nearestJobDistance - b.nearestJobDistance
+      }
+      return 0
+    })
+  }, [filteredCleaners, cleanerSort, selectedLocation])
+
+  const totalCleanerPages = Math.max(1, Math.ceil(sortedCleaners.length / CLEANER_PAGE_SIZE))
+  const cleanerPageSafe = Math.min(cleanerPage, totalCleanerPages)
+  const pagedCleaners = sortedCleaners.slice(
+    (cleanerPageSafe - 1) * CLEANER_PAGE_SIZE,
+    cleanerPageSafe * CLEANER_PAGE_SIZE
+  )
+
+  const sortedUnassigned = useMemo(
+    () => [...jobsUnassigned].sort((a, b) => compareJobs(a, b, unassignedSort)),
+    [jobsUnassigned, unassignedSort, quotePins]
+  )
+  const sortedAssigned = useMemo(
+    () => [...jobsAssigned].sort((a, b) => compareJobs(a, b, assignedSort)),
+    [jobsAssigned, assignedSort, quotePins]
+  )
+
+  const totalUnassignedPages = Math.max(1, Math.ceil(sortedUnassigned.length / JOB_PAGE_SIZE))
+  const totalAssignedPages = Math.max(1, Math.ceil(sortedAssigned.length / JOB_PAGE_SIZE))
+  const unassignedPageSafe = Math.min(unassignedPage, totalUnassignedPages)
+  const assignedPageSafe = Math.min(assignedPage, totalAssignedPages)
+
+  const pagedUnassigned = sortedUnassigned.slice(
+    (unassignedPageSafe - 1) * JOB_PAGE_SIZE,
+    unassignedPageSafe * JOB_PAGE_SIZE
+  )
+  const pagedAssigned = sortedAssigned.slice((assignedPageSafe - 1) * JOB_PAGE_SIZE, assignedPageSafe * JOB_PAGE_SIZE)
+
+  const filteredBulkCleaners = useMemo(() => {
+    const q = bulkSearch.trim().toLowerCase()
+    if (!q) return activeCleaners
+    return activeCleaners.filter(
+      (c) => c.full_name.toLowerCase().includes(q) || (c.phone ?? '').toLowerCase().includes(q)
+    )
+  }, [activeCleaners, bulkSearch])
+
+  const totalBulkPages = Math.max(1, Math.ceil(filteredBulkCleaners.length / BULK_PAGE_SIZE))
+  const bulkPageSafe = Math.min(bulkPage, totalBulkPages)
+  const pagedBulkCleaners = filteredBulkCleaners.slice(
+    (bulkPageSafe - 1) * BULK_PAGE_SIZE,
+    bulkPageSafe * BULK_PAGE_SIZE
+  )
 
   const assignCleaner = async (occurrenceId: string, cleanerId: string | null) => {
     setError(null)
@@ -538,6 +915,18 @@ export default function Dispatch() {
       setError(e?.message || 'Failed to send bulk SMS')
     } finally {
       setSmsSending(false)
+    }
+  }
+
+  const handleSelectLocation = (item: { place_name: string; center?: [number, number] }) => {
+    if (!item?.center || typeof item.center[0] !== 'number' || typeof item.center[1] !== 'number') return
+    setSelectedLocation({ label: item.place_name, lng: item.center[0], lat: item.center[1] })
+    setLocationQuery(item.place_name)
+    setLocationResults([])
+
+    const map = mapRef.current
+    if (map) {
+      map.flyTo({ center: [item.center[0], item.center[1]], zoom: 12, essential: true })
     }
   }
 
@@ -736,28 +1125,45 @@ export default function Dispatch() {
           <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm">{error}</div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-7 gap-6">
           {/* Jobs + Bulk SMS */}
           <div className="lg:col-span-2 space-y-4">
             {/* Unassigned */}
             <div className="rounded-2xl border border-white/10 bg-[var(--color-surface)] overflow-hidden">
-              <div className="p-4 border-b border-white/10 flex items-center justify-between gap-3">
-                <div className="text-white font-semibold">
-                  Unassigned jobs <span className="text-xs text-[var(--color-text-muted)]">({jobsUnassigned.length})</span>
+              <div className="p-4 border-b border-white/10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-white font-semibold">
+                    Unassigned jobs{' '}
+                    <span className="text-xs text-[var(--color-text-muted)]">({sortedUnassigned.length})</span>
+                  </div>
+                  <div className="text-xs text-[var(--color-text-muted)]">Click a job for full details</div>
                 </div>
-                <div className="text-xs text-[var(--color-text-muted)]">Click a job for full details</div>
+                <div className="flex items-center gap-2 text-xs text-white/80">
+                  <label className="text-[var(--color-text-muted)]">Sort</label>
+                  <select
+                    value={unassignedSort}
+                    onChange={(e) => setUnassignedSort(e.target.value as any)}
+                    className="bg-white/10 border border-white/10 rounded-lg px-2 py-1 text-xs text-white"
+                  >
+                    <option value="due_asc">Closest due</option>
+                    <option value="due_desc">Furthest due</option>
+                    <option value="cost_high">Cost high → low</option>
+                    <option value="cost_low">Cost low → high</option>
+                  </select>
+                </div>
               </div>
 
               <div className="p-2 max-h-[30vh] overflow-y-auto">
-                {jobsUnassigned.length === 0 ? (
+                {sortedUnassigned.length === 0 ? (
                   <div className="p-3 text-sm text-[var(--color-text-muted)]">No unassigned jobs.</div>
                 ) : (
-                  jobsUnassigned.map((j) => {
+                  pagedUnassigned.map((j) => {
                     const seriesId = j.series?.id
                     const quotePin = seriesId ? quotePins[seriesId] : null
                     const pinLat = quotePin?.lat ?? j.series?.service_lat
                     const pinLng = quotePin?.lng ?? j.series?.service_lng
                     const hasCoords = typeof pinLat === 'number' && typeof pinLng === 'number'
+                    const cost = getJobCost(j)
                     return (
                       <div key={j.id} className="p-3 rounded-2xl border border-orange-500/20 bg-orange-500/5 mb-2">
                         <div className="flex items-start justify-between gap-3">
@@ -774,13 +1180,29 @@ export default function Dispatch() {
                             <div className="text-xs text-[var(--color-text-muted)]">
                               {new Date(j.start_at).toLocaleString()} • {j.status}
                             </div>
+                            {cost !== null && (
+                              <div className="text-xs text-[var(--color-text-muted)]">Cost: {formatCurrency(cost)}</div>
+                            )}
                             <div className="text-xs text-[var(--color-text-muted)] truncate">
                               {quotePin?.address || j.series?.service_address || 'No address set'}{' '}
                               {hasCoords ? '' : '• (no map pin yet)'}
                             </div>
                           </button>
 
-                          <div className="w-[220px]">
+                          <div className="w-[220px] space-y-2">
+                            {hasCoords && (
+                              <button
+                                type="button"
+                                onClick={() => highlightJobOnMap(j.id)}
+                                className="w-full px-3 py-1.5 text-xs rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white transition-colors flex items-center gap-1"
+                                title="View on map"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                                </svg>
+                                View on Map
+                              </button>
+                            )}
                             <div className="relative">
                               <button
                                 type="button"
@@ -837,27 +1259,67 @@ export default function Dispatch() {
                   })
                 )}
               </div>
+
+              {sortedUnassigned.length > JOB_PAGE_SIZE && (
+                <div className="p-3 border-t border-white/10 flex items-center justify-between text-xs text-white/80">
+                  <div>
+                    Page {unassignedPageSafe} / {totalUnassignedPages}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setUnassignedPage((p) => Math.max(1, p - 1))}
+                      disabled={unassignedPageSafe <= 1}
+                      className="px-2 py-1 rounded-lg bg-white/10 border border-white/10 disabled:opacity-40"
+                    >
+                      Prev
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUnassignedPage((p) => Math.min(totalUnassignedPages, p + 1))}
+                      disabled={unassignedPageSafe >= totalUnassignedPages}
+                      className="px-2 py-1 rounded-lg bg-white/10 border border-white/10 disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Assigned */}
             <div className="rounded-2xl border border-white/10 bg-[var(--color-surface)] overflow-hidden">
-              <div className="p-4 border-b border-white/10">
+              <div className="p-4 border-b border-white/10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-white font-semibold">
-                  Assigned jobs <span className="text-xs text-[var(--color-text-muted)]">({jobsAssigned.length})</span>
+                  Assigned jobs <span className="text-xs text-[var(--color-text-muted)]">({sortedAssigned.length})</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-white/80">
+                  <label className="text-[var(--color-text-muted)]">Sort</label>
+                  <select
+                    value={assignedSort}
+                    onChange={(e) => setAssignedSort(e.target.value as any)}
+                    className="bg-white/10 border border-white/10 rounded-lg px-2 py-1 text-xs text-white"
+                  >
+                    <option value="due_asc">Closest due</option>
+                    <option value="due_desc">Furthest due</option>
+                    <option value="cost_high">Cost high → low</option>
+                    <option value="cost_low">Cost low → high</option>
+                  </select>
                 </div>
               </div>
 
               <div className="p-2 max-h-[30vh] overflow-y-auto">
-                {jobsAssigned.length === 0 ? (
+                {sortedAssigned.length === 0 ? (
                   <div className="p-3 text-sm text-[var(--color-text-muted)]">No assigned jobs.</div>
                 ) : (
-                  jobsAssigned.map((j) => {
+                  pagedAssigned.map((j) => {
                     const seriesId = j.series?.id
                     const quotePin = seriesId ? quotePins[seriesId] : null
                     const pinLat = quotePin?.lat ?? j.series?.service_lat
                     const pinLng = quotePin?.lng ?? j.series?.service_lng
                     const hasCoords = typeof pinLat === 'number' && typeof pinLng === 'number'
                     const assignedCleaner = cleaners.find((c) => c.id === j.cleaner_id)
+                    const cost = getJobCost(j)
                     return (
                       <div key={j.id} className="p-3 rounded-2xl border border-green-500/20 bg-green-500/5 mb-2">
                         <div className="flex items-start justify-between gap-3">
@@ -874,6 +1336,9 @@ export default function Dispatch() {
                             <div className="text-xs text-[var(--color-text-muted)]">
                               {new Date(j.start_at).toLocaleString()} • {j.status}
                             </div>
+                            {cost !== null && (
+                              <div className="text-xs text-[var(--color-text-muted)]">Cost: {formatCurrency(cost)}</div>
+                            )}
                             <div className="text-xs text-[var(--color-text-muted)] truncate">
                               {quotePin?.address || j.series?.service_address || 'No address set'}{' '}
                               {hasCoords ? '' : '• (no map pin yet)'}
@@ -881,6 +1346,19 @@ export default function Dispatch() {
                           </button>
 
                           <div className="w-[220px] space-y-2">
+                            {hasCoords && (
+                              <button
+                                type="button"
+                                onClick={() => highlightJobOnMap(j.id)}
+                                className="w-full px-3 py-1.5 text-xs rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white transition-colors flex items-center gap-1"
+                                title="View on map"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                                </svg>
+                                View on Map
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => assignedCleaner && openCleanerModal(assignedCleaner.id)}
@@ -951,6 +1429,32 @@ export default function Dispatch() {
                   })
                 )}
               </div>
+
+              {sortedAssigned.length > JOB_PAGE_SIZE && (
+                <div className="p-3 border-t border-white/10 flex items-center justify-between text-xs text-white/80">
+                  <div>
+                    Page {assignedPageSafe} / {totalAssignedPages}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAssignedPage((p) => Math.max(1, p - 1))}
+                      disabled={assignedPageSafe <= 1}
+                      className="px-2 py-1 rounded-lg bg-white/10 border border-white/10 disabled:opacity-40"
+                    >
+                      Prev
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAssignedPage((p) => Math.min(totalAssignedPages, p + 1))}
+                      disabled={assignedPageSafe >= totalAssignedPages}
+                      className="px-2 py-1 rounded-lg bg-white/10 border border-white/10 disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Bulk SMS */}
@@ -962,11 +1466,23 @@ export default function Dispatch() {
                 </div>
               </div>
               <div className="p-4 space-y-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <input
+                    value={bulkSearch}
+                    onChange={(e) => setBulkSearch(e.target.value)}
+                    placeholder="Search cleaners by name or phone"
+                    className="flex-1 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white"
+                  />
+                  <span className="text-xs text-[var(--color-text-muted)]">
+                    {filteredBulkCleaners.length} match{filteredBulkCleaners.length === 1 ? '' : 'es'}
+                  </span>
+                </div>
+
                 <div className="max-h-40 overflow-y-auto border border-white/10 rounded-xl bg-black/20">
-                  {activeCleaners.length === 0 ? (
+                  {filteredBulkCleaners.length === 0 ? (
                     <div className="p-3 text-sm text-[var(--color-text-muted)]">No cleaners.</div>
                   ) : (
-                    activeCleaners.map((c) => (
+                    pagedBulkCleaners.map((c) => (
                       <label
                         key={c.id}
                         className="flex items-center gap-3 px-3 py-2 border-b border-white/5 last:border-b-0 text-sm"
@@ -982,6 +1498,31 @@ export default function Dispatch() {
                     ))
                   )}
                 </div>
+                {filteredBulkCleaners.length > BULK_PAGE_SIZE && (
+                  <div className="flex items-center justify-between text-xs text-white/80">
+                    <div>
+                      Page {bulkPageSafe} / {totalBulkPages}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setBulkPage((p) => Math.max(1, p - 1))}
+                        disabled={bulkPageSafe <= 1}
+                        className="px-2 py-1 rounded-lg bg-white/10 border border-white/10 disabled:opacity-40"
+                      >
+                        Prev
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBulkPage((p) => Math.min(totalBulkPages, p + 1))}
+                        disabled={bulkPageSafe >= totalBulkPages}
+                        className="px-2 py-1 rounded-lg bg-white/10 border border-white/10 disabled:opacity-40"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <textarea
                   value={bulkMessage}
                   onChange={(e) => setBulkMessage(e.target.value)}
@@ -1009,6 +1550,194 @@ export default function Dispatch() {
               </div>
             </div>
             <div ref={mapContainerRef} style={{ height: '72vh', width: '100%' }} />
+          </div>
+
+          {/* Cleaner Side Panel */}
+          <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-[var(--color-surface)] overflow-hidden">
+            <div className="p-4 border-b border-white/10">
+              <div className="text-white font-semibold">Cleaners</div>
+              <div className="text-xs text-[var(--color-text-muted)] mt-1">
+                Available cleaners and their status
+              </div>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="grid gap-3">
+                <div className="space-y-2">
+                  <div className="text-xs text-[var(--color-text-muted)]">Search by area (Mapbox powered)</div>
+                  <div className="relative">
+                    <input
+                      value={locationQuery}
+                      onChange={(e) => setLocationQuery(e.target.value)}
+                      placeholder="Type a suburb or postcode to rank cleaners by distance"
+                      className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm"
+                    />
+                    {isLocationSearching && (
+                      <div className="absolute right-3 top-2 text-xs text-[var(--color-text-muted)]">Searching…</div>
+                    )}
+                    {locationResults.length > 0 && (
+                      <div className="absolute mt-1 w-full rounded-lg bg-[#0c0f16] border border-white/10 z-[10030] max-h-48 overflow-y-auto shadow-2xl">
+                        {locationResults.map((item) => (
+                          <button
+                            key={item.place_name}
+                            type="button"
+                            onClick={() => handleSelectLocation(item)}
+                            className="w-full text-left px-3 py-2 text-sm text-white hover:bg-white/10"
+                          >
+                            {item.place_name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {selectedLocation && (
+                    <div className="flex items-center justify-between text-xs text-white/80 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+                      <span>
+                        Using location: <span className="font-semibold text-white">{selectedLocation.label}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedLocation(null)
+                          setLocationQuery('')
+                        }}
+                        className="text-[var(--color-text-muted)] hover:text-white"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2 w-full sm:max-w-xs">
+                    <input
+                      value={cleanerNameFilter}
+                      onChange={(e) => setCleanerNameFilter(e.target.value)}
+                      placeholder="Filter cleaners by name"
+                      className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-white/80">
+                    <label className="text-[var(--color-text-muted)]">Sort</label>
+                    <select
+                      value={cleanerSort}
+                      onChange={(e) => setCleanerSort(e.target.value as any)}
+                      className="bg-white/10 border border-white/10 rounded-lg px-2 py-1 text-xs text-white"
+                    >
+                      <option value="distance">Distance (if location set)</option>
+                      <option value="reviews">Reviews high → low</option>
+                      <option value="availability">Availability</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="max-h-[58vh] overflow-y-auto pr-1">
+                {sortedCleaners.length === 0 ? (
+                  <div className="text-sm text-[var(--color-text-muted)]">No active cleaners.</div>
+                ) : (
+                  <div className="space-y-3">
+                    {pagedCleaners.map((item) => {
+                      const { cleaner, currentJobs, isAvailable, hasValidCoords, nearestJobDistance, nearestJob, reviewAvg, reviewCount, distanceToSearch } = item
+                      return (
+                        <div key={cleaner.id} className="p-3 rounded-xl border border-white/10 bg-white/5">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0 space-y-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-white font-medium truncate">{cleaner.full_name}</div>
+                                <div className="text-xs text-[var(--color-text-muted)]">
+                                  {currentJobs.length} job{currentJobs.length !== 1 ? 's' : ''}
+                                </div>
+                              </div>
+                              <div className="text-xs text-[var(--color-text-muted)]">
+                                {isAvailable ? (
+                                  <span className="text-emerald-400">● Available</span>
+                                ) : (
+                                  <span className="text-amber-400">● Busy</span>
+                                )}
+                                {selectedLocation ? (
+                                  <span className="ml-2 text-blue-400">
+                                    • {distanceToSearch !== null ? `${formatDistance(distanceToSearch)} away` : 'No base location'}
+                                  </span>
+                                ) : (
+                                  nearestJobDistance !== null && (
+                                    <span className="ml-2 text-blue-400">
+                                      • {formatDistance(nearestJobDistance)} to nearest job
+                                    </span>
+                                  )
+                                )}
+                              </div>
+                              {cleaner.base_location_text && (
+                                <div className="text-xs text-[var(--color-text-muted)] truncate">
+                                  📍 {cleaner.base_location_text}
+                                </div>
+                              )}
+                              {reviewCount > 0 ? (
+                                <div className="text-xs text-white/80">
+                                  {reviewAvg !== null ? reviewAvg.toFixed(1) : '—'}/5 based on {reviewCount}{' '}
+                                  review{reviewCount === 1 ? '' : 's'}
+                                </div>
+                              ) : (
+                                <div className="text-xs text-[var(--color-text-muted)]">No reviews yet.</div>
+                              )}
+                              {!isAvailable && currentJobs.length > 0 && (
+                                <div className="text-xs text-[var(--color-text-muted)] truncate">
+                                  Current: {currentJobs.map(j => j.series?.title || 'Job').join(', ')}
+                                </div>
+                              )}
+                              {nearestJob && (
+                                <div className="text-xs text-[var(--color-text-muted)] truncate">
+                                  Nearest job: {nearestJob.series?.title || 'Job'} ({new Date(nearestJob.start_at).toLocaleString()})
+                                </div>
+                              )}
+                            </div>
+                            {hasValidCoords && (
+                              <button
+                                type="button"
+                                onClick={() => highlightCleanerOnMap(cleaner.id)}
+                                className="px-2 py-1.5 text-xs rounded-lg bg-purple-600 hover:bg-purple-700 text-white transition-colors flex items-center gap-1 flex-shrink-0"
+                                title="View on map"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                                </svg>
+                                Map
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {sortedCleaners.length > CLEANER_PAGE_SIZE && (
+                <div className="flex items-center justify-between text-xs text-white/80">
+                  <div>
+                    Page {cleanerPageSafe} / {totalCleanerPages}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCleanerPage((p) => Math.max(1, p - 1))}
+                      disabled={cleanerPageSafe <= 1}
+                      className="px-2 py-1 rounded-lg bg-white/10 border border-white/10 disabled:opacity-40"
+                    >
+                      Prev
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCleanerPage((p) => Math.min(totalCleanerPages, p + 1))}
+                      disabled={cleanerPageSafe >= totalCleanerPages}
+                      className="px-2 py-1 rounded-lg bg-white/10 border border-white/10 disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

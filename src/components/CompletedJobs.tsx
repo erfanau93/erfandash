@@ -127,7 +127,7 @@ function StatusPill({ status }: { status: PaymentStatus }) {
   )
 }
 
-type PaymentFilter = 'all' | 'paid' | 'awaiting_payment'
+type PaymentFilter = 'all' | 'paid' | 'awaiting_payment' | 'past_due'
 
 type SortOption = 'date_desc' | 'date_asc' | 'name_asc' | 'name_desc' | 'amount_desc' | 'amount_asc'
 
@@ -147,6 +147,8 @@ export default function CompletedJobs() {
   const [lastCalls, setLastCalls] = useState<Record<string, string | null>>({})
   const [notesInputs, setNotesInputs] = useState<Record<string, string>>({})
   const [savingNotesId, setSavingNotesId] = useState<string | null>(null)
+  const [pastDueCount, setPastDueCount] = useState<number>(0)
+  const [pastDueRows, setPastDueRows] = useState<CompletedRow[]>([])
 
   // SMS templates are handled inside PaymentReminderSms / ReviewReminderSms components.
 
@@ -254,6 +256,8 @@ export default function CompletedJobs() {
     setIsLoading(true)
     setError(null)
     try {
+      const nowIso = new Date().toISOString()
+
       const { data, error: occError } = await supabase
         .from('booking_occurrences')
         .select(`*, series:booking_series(*, lead:extracted_leads(*))`)
@@ -264,9 +268,22 @@ export default function CompletedJobs() {
       if (occError) throw occError
 
       const occurrences = (data || []) as any[]
+
+      const { data: overdueData, error: overdueErr } = await supabase
+        .from('booking_occurrences')
+        .select(`*, series:booking_series!inner(*, lead:extracted_leads(*))`)
+        .lt('start_at', nowIso)
+        .in('status', ['scheduled', 'skipped'])
+        .order('start_at', { ascending: false })
+        .limit(200)
+
+      if (overdueErr) throw overdueErr
+      const overdueOccurrences = (overdueData || []) as any[]
+      const allOccurrences = [...occurrences, ...overdueOccurrences]
+
       const quoteIds = Array.from(
         new Set(
-          occurrences
+          allOccurrences
             .map((occ) => occ?.series?.quote_id)
             .filter(Boolean)
         )
@@ -291,7 +308,7 @@ export default function CompletedJobs() {
       // Legacy fallback for series without a linked quote_id
       const fallbackLeadIds = Array.from(
         new Set(
-          occurrences
+          allOccurrences
             .map((occ) => (!occ?.series?.quote_id ? occ?.series?.lead?.id : null))
             .filter(Boolean)
         )
@@ -315,36 +332,43 @@ export default function CompletedJobs() {
         }
       }
 
-      const mapped: CompletedRow[] = occurrences.map((occ) => {
-        const series = occ.series as BookingSeries
-        const lead = (series?.lead as Lead) || null
-        const linkedQuote = series?.quote_id ? quotesById[series.quote_id] : null
-        // Fallback only for legacy bookings created before quote_id requirement
-        const fallbackQuote = series?.quote_id ? null : (lead?.id ? latestQuotes[lead.id] : null)
-        const quote = linkedQuote || fallbackQuote || null
-        return {
-          occurrence: occ as BookingOccurrence,
-          series,
-          lead,
-          quote,
-        }
-      })
+      const mapOccurrences = (list: any[]): CompletedRow[] =>
+        list.map((occ) => {
+          const series = occ.series as BookingSeries
+          const lead = (series?.lead as Lead) || null
+          const linkedQuote = series?.quote_id ? quotesById[series.quote_id] : null
+          // Fallback only for legacy bookings created before quote_id requirement
+          const fallbackQuote = series?.quote_id ? null : (lead?.id ? latestQuotes[lead.id] : null)
+          const quote = linkedQuote || fallbackQuote || null
+          return {
+            occurrence: occ as BookingOccurrence,
+            series,
+            lead,
+            quote,
+          }
+        })
 
-      setRows(mapped)
+      const mappedCompleted = mapOccurrences(occurrences)
+      const mappedOverdue = mapOccurrences(overdueOccurrences)
+
+      setRows(mappedCompleted)
+      setPastDueRows(mappedOverdue)
+      setPastDueCount(mappedOverdue.length)
       
       // Initialize notes inputs from occurrence notes
       const notesMap: Record<string, string> = {}
-      mapped.forEach((row) => {
+      const allRows = [...mappedCompleted, ...mappedOverdue]
+      allRows.forEach((row) => {
         if (row.occurrence.notes) {
           notesMap[row.occurrence.id] = row.occurrence.notes
         }
       })
       setNotesInputs((prev) => ({ ...prev, ...notesMap }))
 
-      const occurrenceIds = mapped.map((m) => m.occurrence.id)
+      const occurrenceIds = allRows.map((m) => m.occurrence.id)
       if (occurrenceIds.length) {
         await loadSmsMetadata(occurrenceIds)
-        await loadLastCalls(mapped)
+        await loadLastCalls(allRows)
       }
     } catch (err: any) {
       console.error('Failed to load completed jobs', err)
@@ -566,7 +590,8 @@ export default function CompletedJobs() {
   )
 
   const filteredAndSortedRows = useMemo(() => {
-    let filtered = rows
+    const sourceRows = paymentFilter === 'past_due' ? pastDueRows : rows
+    let filtered = sourceRows
 
     // Apply payment status filter
     if (paymentFilter === 'paid') {
@@ -627,7 +652,7 @@ export default function CompletedJobs() {
           </div>
         </header>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <button
             onClick={() => setPaymentFilter('all')}
             className={`glass-card rounded-xl p-4 border transition-colors text-left ${
@@ -660,6 +685,22 @@ export default function CompletedJobs() {
           >
             <p className="text-sm text-[var(--color-text-muted)]">Awaiting payment</p>
             <p className="text-3xl font-bold text-white">{totalAwaiting}</p>
+          </button>
+          <button
+            onClick={() => setPaymentFilter('past_due')}
+            className={`glass-card rounded-xl p-4 border transition-colors text-left ${
+              paymentFilter === 'past_due'
+                ? 'border-emerald-400/50 bg-emerald-500/10'
+                : 'border-white/10 hover:border-white/20'
+            }`}
+          >
+            <p className="text-sm text-[var(--color-text-muted)]">Past due jobs</p>
+            <p className="text-3xl font-bold text-white">
+              {isLoading ? '...' : pastDueCount}
+            </p>
+            <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
+              Booked before now, not marked completed
+            </p>
           </button>
         </div>
 

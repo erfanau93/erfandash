@@ -18,6 +18,42 @@ interface ExtractedLead {
   last_text_body?: string | null
 }
 
+type LeadJobStatus = 'scheduled' | 'completed' | 'cancelled' | 'skipped'
+
+type LeadJob = {
+  id: string
+  start_at: string
+  end_at: string
+  status: LeadJobStatus
+  series?: {
+    id: string
+    title?: string | null
+  } | null
+}
+
+const JOB_STATUS_STYLES: Record<LeadJobStatus, { label: string; pill: string; button: string }> = {
+  scheduled: {
+    label: 'Scheduled',
+    pill: 'bg-blue-500/20 text-blue-100 border border-blue-400/40',
+    button: 'bg-blue-600/20 hover:bg-blue-600/30 text-blue-100 border border-blue-400/40',
+  },
+  completed: {
+    label: 'Completed',
+    pill: 'bg-emerald-500/20 text-emerald-100 border border-emerald-400/40',
+    button: 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-100 border border-emerald-400/40',
+  },
+  cancelled: {
+    label: 'Cancelled',
+    pill: 'bg-slate-500/20 text-slate-100 border border-slate-400/40',
+    button: 'bg-slate-600/20 hover:bg-slate-600/30 text-slate-100 border border-slate-400/40',
+  },
+  skipped: {
+    label: 'Skipped',
+    pill: 'bg-amber-500/20 text-amber-100 border border-amber-400/40',
+    button: 'bg-amber-600/20 hover:bg-amber-600/30 text-amber-100 border border-amber-400/40',
+  },
+}
+
 interface LeadEmail extends DialpadEmail {
   external_number?: string | null
   extractedLead?: ExtractedLead | null
@@ -33,6 +69,10 @@ function LeadModal({ email, onClose, onExtracted }: LeadModalProps) {
   const [extractedLead, setExtractedLead] = useState<ExtractedLead | null>(null)
   const [isExtracting, setIsExtracting] = useState(false)
   const [extractionError, setExtractionError] = useState<string | null>(null)
+  const [todayJobs, setTodayJobs] = useState<LeadJob[]>([])
+  const [jobsLoading, setJobsLoading] = useState(false)
+  const [jobsError, setJobsError] = useState<string | null>(null)
+  const [updatingJobId, setUpdatingJobId] = useState<string | null>(null)
 
   // Handle ESC key to close modal
   useEffect(() => {
@@ -78,6 +118,72 @@ function LeadModal({ email, onClose, onExtracted }: LeadModalProps) {
 
     fetchExtractedLead()
   }, [email.id])
+
+  const fetchTodayJobs = useCallback(
+    async (leadId: string) => {
+      setJobsLoading(true)
+      setJobsError(null)
+      try {
+        const start = startOfDay(new Date()).toISOString()
+        const end = endOfDay(new Date()).toISOString()
+
+        const { data, error } = await supabase
+          .from('booking_occurrences')
+          .select('id, start_at, end_at, status, series:booking_series!inner(id, title, lead_id)')
+          .gte('start_at', start)
+          .lte('start_at', end)
+          .eq('series.lead_id', leadId)
+          .order('start_at', { ascending: true })
+
+        if (error) throw error
+        setTodayJobs((data || []) as LeadJob[])
+      } catch (err: any) {
+        console.error('Error loading today jobs', err)
+        setJobsError(err?.message || 'Could not load today’s jobs')
+        setTodayJobs([])
+      } finally {
+        setJobsLoading(false)
+      }
+    },
+    []
+  )
+
+  useEffect(() => {
+    if (!extractedLead?.id) {
+      setTodayJobs([])
+      return
+    }
+    fetchTodayJobs(extractedLead.id)
+  }, [extractedLead?.id, fetchTodayJobs])
+
+  const handleJobStatusChange = async (jobId: string, status: LeadJobStatus) => {
+    if (!extractedLead?.id) return
+    setUpdatingJobId(jobId)
+    setJobsError(null)
+    try {
+      const { error } = await supabase
+        .from('booking_occurrences')
+        .update({ status })
+        .eq('id', jobId)
+
+      if (error) throw error
+
+      setTodayJobs((prev) => prev.map((job) => (job.id === jobId ? { ...job, status } : job)))
+    } catch (err: any) {
+      console.error('Error updating job status', err)
+      setJobsError(err?.message || 'Could not update job status')
+    } finally {
+      setUpdatingJobId(null)
+    }
+  }
+
+  const formatJobTime = (value: string) => {
+    try {
+      return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    } catch {
+      return '—'
+    }
+  }
 
   const handleExtractLead = async () => {
     setIsExtracting(true)
@@ -253,6 +359,83 @@ function LeadModal({ email, onClose, onExtracted }: LeadModalProps) {
               <p className="text-[var(--color-text-muted)] text-sm italic">
                 Click "Extract Lead Info" to automatically extract lead information using AI.
               </p>
+            )}
+          </div>
+
+          {/* Today's jobs for this lead */}
+          <div className="mb-6 p-4 rounded-xl bg-[var(--color-surface-light)] border border-white/10">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-medium text-emerald-400 uppercase tracking-wider">Jobs Today</h4>
+              {jobsLoading && (
+                <span className="text-xs text-[var(--color-text-muted)] flex items-center gap-1">
+                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
+                  </svg>
+                  Loading
+                </span>
+              )}
+            </div>
+
+            {jobsError && (
+              <div className="mb-3 p-2 bg-red-500/10 border border-red-500/20 rounded text-red-400 text-xs">
+                {jobsError}
+              </div>
+            )}
+
+            {!extractedLead?.id ? (
+              <p className="text-sm text-[var(--color-text-muted)]">
+                Extract lead info to view today&apos;s booked jobs.
+              </p>
+            ) : todayJobs.length === 0 ? (
+              <p className="text-sm text-[var(--color-text-muted)]">
+                {jobsLoading ? 'Loading jobs...' : 'No jobs scheduled for today.'}
+              </p>
+            ) : (
+              <div className="rounded-lg border border-white/5 divide-y divide-white/5 bg-white/5">
+                {todayJobs.map((job) => {
+                  const style = JOB_STATUS_STYLES[job.status]
+                  return (
+                    <div
+                      key={job.id}
+                      className="flex flex-col md:grid md:grid-cols-[1.4fr_0.9fr_auto] items-start gap-3 px-3 py-2"
+                    >
+                      <div className="space-y-0.5">
+                        <p className="text-white text-sm font-medium">{job.series?.title || 'Job'}</p>
+                        <p className="text-xs text-[var(--color-text-muted)]">
+                          {formatJobTime(job.start_at)} – {formatJobTime(job.end_at)}
+                        </p>
+                      </div>
+                      <div>
+                        <span className={`inline-flex items-center px-2 py-1 text-[11px] rounded-full ${style.pill}`}>
+                          {style.label}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(Object.keys(JOB_STATUS_STYLES) as LeadJobStatus[]).map((status) => {
+                          const btnStyle = JOB_STATUS_STYLES[status].button
+                          return (
+                            <button
+                              key={status}
+                              onClick={() => handleJobStatusChange(job.id, status)}
+                              disabled={updatingJobId === job.id || job.status === status}
+                              className={`px-2.5 py-1 text-[11px] rounded-md border transition-colors ${
+                                job.status === status ? 'ring-1 ring-emerald-400/50' : ''
+                              } ${btnStyle} disabled:opacity-60`}
+                            >
+                              {JOB_STATUS_STYLES[status].label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             )}
           </div>
 

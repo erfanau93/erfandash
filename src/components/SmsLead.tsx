@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
+import { playSaveSound } from '../lib/sounds'
 
 type SmsTemplate = {
   id?: string
@@ -251,10 +252,10 @@ export default function SmsLead({
         throw new Error(errorDetail)
       }
 
-      const sentAtMs = Date.now()
+      const sentAtIso = new Date().toISOString()
       const { data: updated, error: updateError } = await supabase
         .from('extracted_leads')
-        .update({ last_text_date: sentAtMs, last_text_body: resolvedBody.trim() })
+        .update({ last_text_date: sentAtIso, last_text_body: resolvedBody.trim() })
         .eq('id', leadId)
         .select('id,last_text_date,last_text_body')
         .maybeSingle()
@@ -266,7 +267,7 @@ export default function SmsLead({
         )
       }
 
-      const appliedDate = updated?.last_text_date ?? sentAtMs
+      const appliedDate = updated?.last_text_date ?? sentAtIso
       const appliedBody = updated?.last_text_body || resolvedBody.trim()
 
       onSent?.({ sentAt: appliedDate, message: appliedBody })
@@ -313,6 +314,7 @@ export default function SmsLead({
       setTemplates((prev) => [...prev, data as SmsTemplate])
       setSelectedTemplateId((data as SmsTemplate).id || slug)
       setSendSuccess('Template saved')
+      playSaveSound()
     } catch (err) {
       console.error('Error saving template', err)
       setSendingError(err instanceof Error ? err.message : 'Failed to save template')

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { format, formatDistanceToNow } from 'date-fns'
 import { supabase } from '../lib/supabase'
+import { playSaveSound } from '../lib/sounds'
 import PaymentReminderSms from './PaymentReminderSms'
 import ReviewReminderSms from './ReviewReminderSms'
 
@@ -417,6 +418,21 @@ export default function CompletedJobs() {
     }
   }
 
+  const updateLocalOccurrence = useCallback(
+    (occurrenceId: string, updates: Partial<BookingOccurrence>) => {
+      const applyUpdates = (list: CompletedRow[]) =>
+        list.map((r) =>
+          r.occurrence.id === occurrenceId
+            ? { ...r, occurrence: { ...r.occurrence, ...updates } }
+            : r
+        )
+
+      setRows(applyUpdates)
+      setPastDueRows(applyUpdates)
+    },
+    []
+  )
+
   const handleSaveNotes = async (occurrenceId: string, notes: string) => {
     setSavingNotesId(occurrenceId)
     try {
@@ -427,14 +443,9 @@ export default function CompletedJobs() {
 
       if (updateError) throw updateError
 
-      setRows((prev) =>
-        prev.map((r) =>
-          r.occurrence.id === occurrenceId
-            ? { ...r, occurrence: { ...r.occurrence, notes: notes.trim() || null } }
-            : r
-        )
-      )
+      updateLocalOccurrence(occurrenceId, { notes: notes.trim() || null })
       setInfoMessage('Notes saved')
+      playSaveSound()
     } catch (err: any) {
       console.error('Failed to save notes', err)
       setError(err?.message || 'Could not save notes')
@@ -446,7 +457,7 @@ export default function CompletedJobs() {
   const handlePaymentStatus = async (id: string, status: PaymentStatus) => {
     setUpdatingId(id)
     setInfoMessage(null)
-    const row = rows.find((r) => r.occurrence.id === id)
+    const row = rows.find((r) => r.occurrence.id === id) || pastDueRows.find((r) => r.occurrence.id === id)
     const amountCents = row ? getAmountCentsForRow(row) : null
     const payload: Record<string, any> = { payment_status: status }
     if (amountCents) payload.payment_amount_cents = amountCents
@@ -463,13 +474,7 @@ export default function CompletedJobs() {
 
       if (updateError) throw updateError
 
-      setRows((prev) =>
-        prev.map((row) =>
-          row.occurrence.id === id
-            ? { ...row, occurrence: { ...row.occurrence, payment_status: status } }
-            : row
-        )
-      )
+      updateLocalOccurrence(id, payload)
       setInfoMessage(status === 'paid' ? 'Marked as paid (manual)' : 'Payment status updated')
     } catch (err: any) {
       console.error('Failed to update payment status', err)
@@ -576,21 +581,36 @@ export default function CompletedJobs() {
     return url.toString()
   }, [])
 
+  const combinedRows = useMemo(() => {
+    const byId = new Map<string, CompletedRow>()
+    // Prioritize completed rows; fall back to past-due if not present
+    rows.forEach((r) => byId.set(r.occurrence.id, r))
+    pastDueRows.forEach((r) => {
+      if (!byId.has(r.occurrence.id)) byId.set(r.occurrence.id, r)
+    })
+    return Array.from(byId.values())
+  }, [rows, pastDueRows])
+
   const totalPaid = useMemo(
-    () => rows.filter((r) => getDisplayStatus(r) === 'paid').length,
-    [rows, getDisplayStatus]
+    () => combinedRows.filter((r) => getDisplayStatus(r) === 'paid').length,
+    [combinedRows, getDisplayStatus]
   )
   const totalAwaiting = useMemo(
     () =>
-      rows.filter((r) => {
+      combinedRows.filter((r) => {
         const status = getDisplayStatus(r)
         return status === 'waiting_payment'
       }).length,
-    [rows, getDisplayStatus]
+    [combinedRows, getDisplayStatus]
   )
 
   const filteredAndSortedRows = useMemo(() => {
-    const sourceRows = paymentFilter === 'past_due' ? pastDueRows : rows
+    const sourceRows =
+      paymentFilter === 'past_due'
+        ? pastDueRows
+        : paymentFilter === 'paid' || paymentFilter === 'awaiting_payment'
+          ? combinedRows
+          : rows
     let filtered = sourceRows
 
     // Apply payment status filter
@@ -630,7 +650,7 @@ export default function CompletedJobs() {
     })
 
     return sorted
-  }, [rows, paymentFilter, sortBy, getAmountCentsForRow])
+  }, [rows, pastDueRows, combinedRows, paymentFilter, sortBy, getAmountCentsForRow])
 
   return (
     <div className="min-h-screen p-6 md:p-8">

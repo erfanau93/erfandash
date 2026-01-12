@@ -14,8 +14,8 @@ type ExtractedLead = {
   extracted_at?: string | null
   created_at?: string | null
   status?: string | null
-  first_contact?: string | number | null
-  last_text_date?: string | number | null
+  first_contact?: string | null
+  last_text_date?: string | null
   last_text_body?: string | null
 }
 
@@ -38,6 +38,18 @@ const STATUS_COLORS: Record<string, { bg: string; border: string; header: string
   'Job Won': { bg: 'bg-emerald-950/30', border: 'border-emerald-500/30', header: 'bg-emerald-600/20', dot: 'bg-emerald-400' },
   'Not interested': { bg: 'bg-rose-950/30', border: 'border-rose-500/30', header: 'bg-rose-600/20', dot: 'bg-rose-400' },
   'Jobs Completed': { bg: 'bg-teal-950/30', border: 'border-teal-500/30', header: 'bg-teal-600/20', dot: 'bg-teal-400' },
+}
+
+function normalizeTimestamp(val: string | number | null | undefined): string | null {
+  if (!val) return null
+  if (typeof val === 'number') {
+    // Detect millisecond inputs; fall back to seconds if already smaller
+    const ms = val > 1e10 ? val : val * 1000
+    const d = new Date(ms)
+    return Number.isNaN(d.getTime()) ? null : d.toISOString()
+  }
+  const d = new Date(val)
+  return Number.isNaN(d.getTime()) ? null : d.toISOString()
 }
 
 function formatDate(val: string | number | null | undefined): string | null {
@@ -71,7 +83,12 @@ export default function SalesFunnel() {
         .limit(200)
 
       if (leadsError) throw leadsError
-      setLeads(data || [])
+      const normalized = (data || []).map((lead: any) => ({
+        ...lead,
+        first_contact: normalizeTimestamp(lead.first_contact),
+        last_text_date: normalizeTimestamp(lead.last_text_date),
+      }))
+      setLeads(normalized)
     } catch (err) {
       console.error('Error fetching leads for sales funnel:', err)
       setError(err instanceof Error ? err.message : 'Failed to load leads')
@@ -181,18 +198,18 @@ export default function SalesFunnel() {
         throw new Error(result?.error || 'Failed to initiate call')
       }
 
-      // Record first contact time if not already set
+      // Record first contact time if not already set (store as ISO string)
       if (!lead.first_contact) {
-        const nowMs = Date.now()
+        const nowIso = new Date().toISOString()
         const { error: updateError } = await supabase
           .from('extracted_leads')
-          .update({ first_contact: nowMs })
+          .update({ first_contact: nowIso })
           .eq('id', lead.id)
           .is('first_contact', null)
 
         if (!updateError) {
           setLeads((prev) =>
-            prev.map((l) => (l.id === lead.id ? { ...l, first_contact: nowMs } : l))
+            prev.map((l) => (l.id === lead.id ? { ...l, first_contact: nowIso } : l))
           )
         }
       }

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { supabase, supabaseUrl, supabaseAnonKey, type DialpadCall, type DialpadSms, type DialpadEmail } from '../lib/supabase'
+import { playSaveSound } from '../lib/sounds'
 import DatePicker from './DatePicker'
 import DayComparisonChart from './DayComparisonChart'
 import HourlyActivity from './HourlyActivity'
@@ -638,9 +639,33 @@ export default function Dashboard() {
           schema: 'public',
           table: 'dialpad_emails',
         },
-        () => {
+        (payload) => {
           console.log('Email data changed, refreshing...')
-          fetchMetrics()
+          // Check if this is a lead email - if so, wait a bit for extraction to complete
+          const email = payload.new as any
+          const isLeadEmail = email?.subject && (
+            /^New message from\s+"[^"]+"$/i.test(email.subject.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#39;/g, "'").trim()) ||
+            /^New message from\s+'[^']+'$/i.test(email.subject.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#39;/g, "'").trim()) ||
+            /^New Meta Lead$/i.test(email.subject.trim()) ||
+            /^New Entry - Lead Form$/i.test(email.subject.trim())
+          )
+          
+          if (isLeadEmail && payload.eventType === 'INSERT') {
+            // Wait a bit for extraction to complete, then refresh
+            // Also check again after a longer delay in case extraction takes longer
+            setTimeout(() => {
+              console.log('Lead email detected, refreshing after extraction delay...')
+              fetchMetrics()
+            }, 3000) // 3 second delay for OpenAI extraction
+            
+            // Fallback: check again after 8 seconds in case extraction is slow
+            setTimeout(() => {
+              console.log('Follow-up refresh for lead email extraction...')
+              fetchMetrics()
+            }, 8000)
+          } else {
+            fetchMetrics()
+          }
         }
       )
       .subscribe()
@@ -655,8 +680,8 @@ export default function Dashboard() {
           schema: 'public',
           table: 'extracted_leads',
         },
-        () => {
-          console.log('Extracted leads changed, refreshing...')
+        (payload) => {
+          console.log(payload.eventType === 'INSERT' ? 'New extracted lead inserted, refreshing immediately...' : 'Extracted leads changed, refreshing...')
           fetchMetrics()
         }
       )
@@ -813,11 +838,11 @@ export default function Dashboard() {
 
       // Record the first contact time the first time "Call Lead" is pressed
       if (!hasFirstContact) {
-        // Persist as epoch milliseconds to match numeric column type
-        const nowMs = Date.now()
+        // Persist as ISO string for consistent timestamp storage
+        const nowIso = new Date().toISOString()
         const { data: updatedLead, error: updateError } = await supabase
           .from('extracted_leads')
-          .update({ first_contact: nowMs })
+          .update({ first_contact: nowIso })
           .eq('id', leadId)
           .is('first_contact', null)
           .select('*')
@@ -827,7 +852,7 @@ export default function Dashboard() {
           console.error('Error recording first contact time:', updateError)
           setLeadCallError(updateError.message || 'Failed to record first contact time')
         } else {
-          const firstContactValue = updatedLead?.first_contact ?? nowMs
+          const firstContactValue = updatedLead?.first_contact ?? nowIso
           setExtractedLeads((prev) =>
             prev.map((lead) => {
               if (lead.id !== leadId) return lead
@@ -946,6 +971,7 @@ export default function Dashboard() {
       }
 
       setExtractedLeads((prev) => [leadWithTiming, ...prev])
+      playSaveSound()
       resetManualLeadForm()
     } catch (err) {
       console.error('Error saving manual lead:', err)

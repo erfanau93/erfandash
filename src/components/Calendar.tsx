@@ -6,6 +6,7 @@ import timeGridPlugin from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import type { EventClickArg, EventDropArg, EventContentArg } from '@fullcalendar/core'
 import { supabase } from '../lib/supabase'
+import { playSaveSound } from '../lib/sounds'
 import { format } from 'date-fns'
 import { fetchMapboxToken } from '../lib/mapbox'
 
@@ -860,6 +861,7 @@ export default function Calendar() {
         notes: reviewNotes.trim() || null,
       })
       if (error) throw error
+      playSaveSound()
       setReviewTarget(null)
     } catch (err: any) {
       setReviewError(err?.message || 'Failed to save review')

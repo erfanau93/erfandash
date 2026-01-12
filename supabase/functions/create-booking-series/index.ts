@@ -191,10 +191,10 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'Lead not found' }, 404)
     }
 
-    // 2. Verify the quote exists and belongs to the lead
+    // 2. Verify the quote exists and belongs to the lead, and fetch address fields
     const { data: quote, error: quoteError } = await supabase
       .from('quotes')
-      .select('id, lead_id')
+      .select('id, lead_id, address, address_lat, address_lng')
       .eq('id', payload.quoteId)
       .eq('lead_id', payload.leadId)
       .single()
@@ -203,7 +203,12 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'Quote not found or does not belong to this lead' }, 404)
     }
 
-    // 3. Create the booking series
+    // Extract address fields from quote
+    const quoteAddress = (quote as any).address || null
+    const quoteLat = typeof (quote as any).address_lat === 'number' ? (quote as any).address_lat : null
+    const quoteLng = typeof (quote as any).address_lng === 'number' ? (quote as any).address_lng : null
+
+    // 3. Create the booking series with synced address from quote
     const { data: series, error: seriesError } = await supabase
       .from('booking_series')
       .insert({
@@ -218,6 +223,9 @@ Deno.serve(async (req) => {
         occurrence_count: payload.occurrenceCount || null,
         notes,
         status: 'active',
+        service_address: quoteAddress,
+        service_lat: quoteLat,
+        service_lng: quoteLng,
       })
       .select()
       .single()

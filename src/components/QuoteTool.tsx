@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { playSaveSound } from '../lib/sounds'
 import { fetchMapboxToken } from '../lib/mapbox'
 import {
   DEFAULT_PRICING,
@@ -450,6 +451,7 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
       })
       resetEditing()
       setSaveMessage('Quote saved and linked to the lead.')
+      playSaveSound()
     } catch (err: any) {
       console.error('Failed to save quote', err)
       const msg = err?.message || err?.error_description || (typeof err === 'string' ? err : 'Failed to save quote')

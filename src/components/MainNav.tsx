@@ -5,6 +5,7 @@ const NAV_ITEMS = [
   { label: 'Dispatch', href: '/dispatch' },
   { label: 'Cleaners', href: '/cleaners' },
   { label: 'Completed Jobs', href: '/completed' },
+  { label: 'Cleaners Payout', href: '/cleaners-payout' },
 ]
 
 const normalizePath = (path: string) => {

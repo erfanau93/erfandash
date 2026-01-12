@@ -6,11 +6,13 @@ import SalesFunnel from './components/SalesFunnel'
 import Calendar from './components/Calendar'
 import CompletedJobs from './components/CompletedJobs'
 import Cleaners from './components/Cleaners'
+import CleanersPayout from './components/CleanersPayout'
 import Dispatch from './components/Dispatch'
 import JobModal from './components/JobModal'
 import GlobalSearch from './components/GlobalSearch'
 import MainNav from './components/MainNav'
 import Breadcrumbs from './components/Breadcrumbs'
+import NewLeadNotifier from './components/NewLeadNotifier'
 
 function getBreadcrumbs(path: string): Array<{ label: string; href?: string }> {
   const normalizedPath = path.replace(/\/+$/, '') || '/'
@@ -24,6 +26,7 @@ function getBreadcrumbs(path: string): Array<{ label: string; href?: string }> {
     '/calendar': 'Calendar',
     '/dispatch': 'Dispatch',
     '/cleaners': 'Cleaners',
+    '/cleaners-payout': 'Cleaners Payout',
     '/completed': 'Completed Jobs',
     '/completed-jobs': 'Completed Jobs',
   }
@@ -209,6 +212,7 @@ function App() {
           <Breadcrumbs items={breadcrumbs} />
         </div>
         <GlobalSearch />
+        <NewLeadNotifier />
         <SalesFunnel />
         <JobModal />
       </div>
@@ -224,6 +228,7 @@ function App() {
           <Breadcrumbs items={breadcrumbs} />
         </div>
         <GlobalSearch />
+        <NewLeadNotifier />
         <Calendar />
         <JobModal />
       </div>
@@ -239,6 +244,7 @@ function App() {
           <Breadcrumbs items={breadcrumbs} />
         </div>
         <GlobalSearch />
+        <NewLeadNotifier />
         <CompletedJobs />
         <JobModal />
       </div>
@@ -254,6 +260,7 @@ function App() {
           <Breadcrumbs items={breadcrumbs} />
         </div>
         <GlobalSearch />
+        <NewLeadNotifier />
         <Cleaners />
         <JobModal />
       </div>
@@ -269,7 +276,24 @@ function App() {
           <Breadcrumbs items={breadcrumbs} />
         </div>
         <GlobalSearch />
+        <NewLeadNotifier />
         <Dispatch />
+        <JobModal />
+      </div>
+    )
+  }
+
+  if (path.endsWith('/cleaners-payout')) {
+    return (
+      <div className="animated-bg min-h-screen">
+        {logoutButton}
+        <MainNav />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+          <Breadcrumbs items={breadcrumbs} />
+        </div>
+        <GlobalSearch />
+        <NewLeadNotifier />
+        <CleanersPayout />
         <JobModal />
       </div>
     )
@@ -283,6 +307,7 @@ function App() {
         <Breadcrumbs items={breadcrumbs} />
       </div>
       <GlobalSearch />
+      <NewLeadNotifier />
       <Dashboard />
       <div className="max-w-7xl mx-auto px-8 pb-8">
         <WebhookDebug />

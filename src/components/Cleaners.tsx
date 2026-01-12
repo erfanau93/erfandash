@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { playSaveSound } from '../lib/sounds'
 
 type AvailabilityBucket = 'Morning' | 'Afternoon' | 'Evening' | 'Night'
 type DayName = 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday'
@@ -256,6 +257,7 @@ export default function Cleaners() {
         if (data?.id) setSelectedId(data.id)
       }
       await fetchCleaners()
+      playSaveSound()
     } catch (e: any) {
       setError(e?.message || 'Failed to save cleaner')
     }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase, type DialpadEmail } from '../lib/supabase'
 import { startOfDay, endOfDay, addDays, isSameDay } from 'date-fns'
@@ -555,6 +555,10 @@ export default function Lead() {
   const [error, setError] = useState<string | null>(null)
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const [expandedContacts, setExpandedContacts] = useState<Set<string>>(new Set())
+  
+  // Track recently processed emails/leads to prevent duplicate refreshes
+  const recentlyProcessedEmailsRef = useRef<Set<string>>(new Set())
+  const recentlyProcessedLeadsRef = useRef<Set<string>>(new Set())
 
   const fetchLeads = useCallback(async () => {
     try {
@@ -645,25 +649,69 @@ export default function Lead() {
   useEffect(() => {
     fetchLeads()
 
-    // Subscribe to realtime updates for emails
-    const emailsChannel = supabase
-      .channel('leads_email_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'dialpad_emails' }, () => {
+    // Debounce function to prevent rapid successive refreshes
+    let debounceTimer: number | null = null
+    const debouncedFetchLeads = () => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer)
+      }
+      debounceTimer = window.setTimeout(() => {
         console.log('Email data changed, refreshing leads...')
         fetchLeads()
+        debounceTimer = null
+      }, 500) // 500ms debounce
+    }
+
+    // Subscribe to realtime updates for emails - only listen to INSERT events
+    const emailsChannel = supabase
+      .channel('leads_email_changes')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dialpad_emails' }, (payload) => {
+        const email = payload.new as any
+        const emailId = email?.id
+        
+        // Skip if we've already processed this email recently
+        if (emailId && recentlyProcessedEmailsRef.current.has(emailId)) {
+          console.log(`Skipping duplicate refresh for email ${emailId}`)
+          return
+        }
+        
+        if (emailId) {
+          recentlyProcessedEmailsRef.current.add(emailId)
+          // Clean up after 5 seconds
+          setTimeout(() => recentlyProcessedEmailsRef.current.delete(emailId), 5000)
+        }
+        
+        debouncedFetchLeads()
       })
       .subscribe()
 
-    // Subscribe to realtime updates for extracted leads
+    // Subscribe to realtime updates for extracted leads - only listen to INSERT events
     const extractedLeadsChannel = supabase
       .channel('extracted_leads_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'extracted_leads' }, () => {
-        console.log('Extracted leads data changed, refreshing leads...')
-        fetchLeads()
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'extracted_leads' }, (payload) => {
+        const lead = payload.new as any
+        const leadId = lead?.id
+        
+        // Skip if we've already processed this lead recently
+        if (leadId && recentlyProcessedLeadsRef.current.has(leadId)) {
+          console.log(`Skipping duplicate refresh for lead ${leadId}`)
+          return
+        }
+        
+        if (leadId) {
+          recentlyProcessedLeadsRef.current.add(leadId)
+          // Clean up after 5 seconds
+          setTimeout(() => recentlyProcessedLeadsRef.current.delete(leadId), 5000)
+        }
+        
+        debouncedFetchLeads()
       })
       .subscribe()
 
     return () => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer)
+      }
       supabase.removeChannel(emailsChannel)
       supabase.removeChannel(extractedLeadsChannel)
     }

@@ -254,6 +254,46 @@ type PendingQuoteNav = {
   editQuoteId: string | null
 }
 
+// Deduplicate calls that are effectively the same event. Dialpad sometimes
+// delivers two rows a second apart (or the same second) with different call_id
+// values but identical number/direction/duration. Collapse by a coarse
+// signature: external_number + direction + duration + created_at rounded to
+// the minute (more lenient to catch duplicates that are seconds apart).
+// Also use call_id as a fallback if available to catch exact duplicates.
+const dedupeCallsBySignature = (calls: DialpadCall[]) => {
+  const seen = new Set<string>()
+  const seenByCallId = new Set<string>()
+  const deduped: DialpadCall[] = []
+
+  for (const call of calls) {
+    // First check: if we've seen this exact call_id before, skip it
+    if (call.call_id && seenByCallId.has(call.call_id)) {
+      continue
+    }
+    
+    // Second check: use a more lenient signature (rounded to minute instead of second)
+    // to catch duplicates that are seconds apart
+    const tsMin = Math.floor(new Date(call.created_at).getTime() / (1000 * 60))
+    const key = `${call.external_number || 'unknown'}|${call.direction}|${call.duration}|${tsMin}`
+
+    if (seen.has(key)) {
+      // If we've seen this signature, also track the call_id if available
+      if (call.call_id) {
+        seenByCallId.add(call.call_id)
+      }
+      continue
+    }
+    
+    seen.add(key)
+    if (call.call_id) {
+      seenByCallId.add(call.call_id)
+    }
+    deduped.push(call)
+  }
+
+  return deduped
+}
+
 export default function Dashboard() {
   const [metrics, setMetrics] = useState<Metrics>({
     uniqueCalls: 0,
@@ -320,7 +360,8 @@ export default function Dashboard() {
 
       // Determine date range based on selected date
       let dateStart = todayStart
-      let dateEnd = new Date().toISOString()
+      // For today, use end of today in UTC, not current moment
+      let dateEnd: string
       
       if (selectedDate) {
         const selectedStart = new Date(Date.UTC(
@@ -337,6 +378,16 @@ export default function Dashboard() {
         ))
         dateStart = selectedStart.toISOString()
         dateEnd = selectedEnd.toISOString()
+      } else {
+        // For today, use end of today in UTC
+        const now = new Date()
+        const todayEndUTC = new Date(Date.UTC(
+          now.getUTCFullYear(),
+          now.getUTCMonth(),
+          now.getUTCDate(),
+          23, 59, 59, 999
+        ))
+        dateEnd = todayEndUTC.toISOString()
       }
 
       // Fetch calls for date range (and last 3 days for comparison)
@@ -370,25 +421,44 @@ export default function Dashboard() {
       const typedSms = (sms || []) as DialpadSms[]
       const typedEmails = (emails || []) as DialpadEmail[]
       
+      // Debug: Log raw call count before deduplication
+      console.log(`[Dashboard] Raw calls fetched: ${typedCalls.length}`)
+      
+      const dedupedCalls = dedupeCallsBySignature(typedCalls)
+      
+      // Debug: Log deduplicated call count
+      console.log(`[Dashboard] Calls after deduplication: ${dedupedCalls.length} (removed ${typedCalls.length - dedupedCalls.length} duplicates)`)
+      
       // Store all data for charts
-      setAllCalls(typedCalls)
+      setAllCalls(dedupedCalls)
       setAllSms(typedSms)
       setAllEmails(typedEmails)
 
       // Filter data for selected date (or today if none selected)
-      const filteredCalls = typedCalls.filter(c => {
-        const callDate = new Date(c.created_at)
-        return callDate >= new Date(dateStart) && callDate <= new Date(dateEnd)
+      // Use direct ISO string comparison to avoid timezone issues
+      const filteredCalls = dedupedCalls.filter(c => {
+        const callCreatedAt = c.created_at
+        // Direct string comparison is safe for ISO 8601 timestamps
+        return callCreatedAt >= dateStart && callCreatedAt <= dateEnd
       })
       
+      // Debug: Log filtered call count and date range
+      console.log(`[Dashboard] Date range: ${dateStart} to ${dateEnd}`)
+      console.log(`[Dashboard] Calls after date filtering: ${filteredCalls.length}`)
+      if (filteredCalls.length > 0) {
+        const firstCall = filteredCalls[0].created_at
+        const lastCall = filteredCalls[filteredCalls.length - 1].created_at
+        console.log(`[Dashboard] First call in range: ${firstCall}, Last call: ${lastCall}`)
+      }
+      
       const filteredSms = typedSms.filter(s => {
-        const smsDate = new Date(s.created_at)
-        return smsDate >= new Date(dateStart) && smsDate <= new Date(dateEnd)
+        const smsCreatedAt = s.created_at
+        return smsCreatedAt >= dateStart && smsCreatedAt <= dateEnd
       })
 
       const filteredEmails = typedEmails.filter(e => {
-        const emailDate = new Date(e.created_at)
-        return emailDate >= new Date(dateStart) && emailDate <= new Date(dateEnd)
+        const emailCreatedAt = e.created_at
+        return emailCreatedAt >= dateStart && emailCreatedAt <= dateEnd
       })
 
       // Calculate metrics for selected date

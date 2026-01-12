@@ -18,6 +18,7 @@ type QuoteRow = {
   total_hours: number
   subtotal: number
   discount_amount: number
+  discount_percentage: number
   net_revenue: number
   gst: number
   total_inc_gst: number

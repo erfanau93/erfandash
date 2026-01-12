@@ -45,6 +45,7 @@ type QuoteRecord = {
   total_hours: number
   subtotal: number
   discount_amount: number
+  discount_percentage: number
   net_revenue: number
   gst: number
   total_inc_gst: number
@@ -215,7 +216,12 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
           clientHourlyRate: Number(quoteToEdit.hourly_rate),
           cleanerHourlyRate: Number(quoteToEdit.cleaner_rate),
           discountApplied: quoteToEdit.discount_amount > 0,
-          discountPercentage: quoteToEdit.discount_amount > 0 ? DEFAULT_PRICING.DEFAULT_DISCOUNT_PCT : 0,
+          discountPercentage:
+            typeof quoteToEdit.discount_percentage === 'number'
+              ? quoteToEdit.discount_percentage
+              : quoteToEdit.discount_amount > 0
+              ? DEFAULT_PRICING.DEFAULT_DISCOUNT_PCT
+              : 0,
           depositPercentage: Number(quoteToEdit.deposit_percentage),
         })
         setNotes(quoteToEdit.notes || '')
@@ -397,6 +403,7 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
         total_hours: clamp6_2(calcResult.totalLaborHours),
         subtotal: clamp10_2(calcResult.subtotal),
         discount_amount: clamp10_2(calcResult.discountAmount),
+      discount_percentage: clamp5_2(form.discountPercentage),
         net_revenue: clamp10_2(calcResult.netRevenue),
         gst: clamp10_2(calcResult.gst),
         total_inc_gst: clamp10_2(calcResult.totalIncGst),
@@ -671,7 +678,12 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
       clientHourlyRate: Number(quote.hourly_rate),
       cleanerHourlyRate: Number(quote.cleaner_rate),
       discountApplied: quote.discount_amount > 0,
-      discountPercentage: form.discountPercentage,
+      discountPercentage:
+        typeof quote.discount_percentage === 'number'
+          ? quote.discount_percentage
+          : quote.discount_amount > 0
+          ? DEFAULT_PRICING.DEFAULT_DISCOUNT_PCT
+          : 0,
       depositPercentage: Number(quote.deposit_percentage),
     })
     setNotes(quote.notes || '')

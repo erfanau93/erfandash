@@ -24,3 +24,5 @@ CREATE INDEX IF NOT EXISTS idx_quotes_lead_id_created_at ON quotes(lead_id, crea
 
 
 
+
+

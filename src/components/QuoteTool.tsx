@@ -3,6 +3,14 @@ import { supabase } from '../lib/supabase'
 import { playSaveSound } from '../lib/sounds'
 import { fetchMapboxToken } from '../lib/mapbox'
 import {
+  createBooking,
+  DEFAULT_TIMEZONE,
+  DURATION_OPTIONS,
+  REPEAT_OPTIONS,
+  type CreateBookingPayload,
+  type RepeatType,
+} from '../lib/booking'
+import {
   DEFAULT_PRICING,
   STANDARD_ADD_ONS,
   calculateQuote,
@@ -89,6 +97,18 @@ const ADD_ON_OPTIONS = Object.entries(STANDARD_ADD_ONS).map(([key, hours]) => ({
 
 const initialCustomAddon: CustomAddOn = { name: '', price: 0 }
 
+const getDefaultBookingDate = () => {
+  const tomorrow = new Date()
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  return tomorrow.toISOString().split('T')[0]
+}
+
+const getDefaultBookingEndDate = () => {
+  const sixMonths = new Date()
+  sixMonths.setMonth(sixMonths.getMonth() + 6)
+  return sixMonths.toISOString().split('T')[0]
+}
+
 function generateShareToken() {
   return crypto.randomUUID().replace(/-/g, '').slice(0, 16)
 }
@@ -133,6 +153,17 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
   const [stripeLinkUrl, setStripeLinkUrl] = useState<string | null>(null)
   const [stripeLinkError, setStripeLinkError] = useState<string | null>(null)
   const [stripeLinkLoading, setStripeLinkLoading] = useState(false)
+  const [scheduleBooking, setScheduleBooking] = useState(false)
+  const [bookingDate, setBookingDate] = useState<string>(getDefaultBookingDate)
+  const [bookingTime, setBookingTime] = useState('09:00')
+  const [bookingDuration, setBookingDuration] = useState<number>(120)
+  const [bookingRepeat, setBookingRepeat] = useState<RepeatType>('weekly')
+  const [bookingEndType, setBookingEndType] = useState<'never' | 'date' | 'count'>('never')
+  const [bookingEndDate, setBookingEndDate] = useState<string>(getDefaultBookingEndDate)
+  const [bookingOccurrenceCount, setBookingOccurrenceCount] = useState<number>(12)
+  const [bookingNotes, setBookingNotes] = useState('')
+  const [bookingStatusMessage, setBookingStatusMessage] = useState<string | null>(null)
+  const [bookingError, setBookingError] = useState<string | null>(null)
 
   const leadId = lead?.id || null
   const latestQuote = quotes[0] || null
@@ -351,6 +382,8 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
   const clamp5_2 = (val: number) => clampValue(val, 999.99)
 
   const handleSaveQuote = async (mode: 'auto' | 'new' = 'auto') => {
+    setBookingError(null)
+    setBookingStatusMessage(null)
     if (!leadId && !editingLeadId) {
       setCalcError('Extract the lead first to attach the quote.')
       return
@@ -450,6 +483,57 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
       // Keep the booking in sync with this quote (address + explicit quote link)
       await syncQuoteToBooking(saved)
 
+      const savedQuoteId = saved?.id || editingQuoteId
+      let bookingSuccessText: string | null = null
+
+      if (scheduleBooking) {
+        if (!targetLeadId || !savedQuoteId) {
+          setBookingError('Need a lead and quote to create a booking.')
+        } else {
+          try {
+            const startDate = new Date(`${bookingDate}T${bookingTime}:00`)
+            if (Number.isNaN(startDate.getTime())) {
+              throw new Error('Pick a valid booking date and time for the booking.')
+            }
+
+            const bookingPayload: CreateBookingPayload = {
+              leadId: targetLeadId,
+              quoteId: savedQuoteId,
+              startsAt: startDate.toISOString(),
+              durationMinutes: bookingDuration,
+              repeatType: bookingRepeat,
+              notes: bookingNotes || notes || undefined,
+              updateLeadStatus: true,
+              timezone: DEFAULT_TIMEZONE,
+            }
+
+            if (bookingRepeat !== 'none') {
+              if (bookingEndType === 'date') {
+                bookingPayload.untilDate = bookingEndDate
+              } else if (bookingEndType === 'count') {
+                bookingPayload.occurrenceCount = bookingOccurrenceCount
+              }
+            }
+
+            const bookingResult = await createBooking(bookingPayload)
+            const occurrencesCreated =
+              typeof bookingResult?.occurrences_created === 'number'
+                ? bookingResult.occurrences_created
+                : bookingRepeat === 'none'
+                ? 1
+                : undefined
+
+            bookingSuccessText = `Booking scheduled${
+              occurrencesCreated ? ` (${occurrencesCreated} occurrence${occurrencesCreated === 1 ? '' : 's'})` : ''
+            } starting ${startDate.toLocaleString()}.`
+            setBookingStatusMessage(bookingSuccessText)
+          } catch (bookingErr) {
+            const msg = bookingErr instanceof Error ? bookingErr.message : 'Failed to schedule booking'
+            setBookingError(msg)
+          }
+        }
+      }
+
       setQuotes((prev) => {
         if (editingQuoteId && saved) {
           return prev.map((q) => (q.id === editingQuoteId ? saved! : q))
@@ -457,7 +541,8 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
         return saved ? [saved, ...prev] : prev
       })
       resetEditing()
-      setSaveMessage('Quote saved and linked to the lead.')
+      const baseSaveMessage = 'Quote saved and linked to the lead.'
+      setSaveMessage(bookingSuccessText ? `${baseSaveMessage} ${bookingSuccessText}` : baseSaveMessage)
       playSaveSound()
     } catch (err: any) {
       console.error('Failed to save quote', err)
@@ -604,6 +689,20 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
     [mapboxToken]
   )
 
+  const resetBookingFields = useCallback(() => {
+    setScheduleBooking(false)
+    setBookingDate(getDefaultBookingDate())
+    setBookingTime('09:00')
+    setBookingDuration(120)
+    setBookingRepeat('weekly')
+    setBookingEndType('never')
+    setBookingEndDate(getDefaultBookingEndDate())
+    setBookingOccurrenceCount(12)
+    setBookingNotes('')
+    setBookingStatusMessage(null)
+    setBookingError(null)
+  }, [])
+
   const handleGenerateDescription = async () => {
     setIsDescLoading(true)
     setCalcError(null)
@@ -665,6 +764,7 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
   }, [applyLeadDefaults])
 
   const loadQuoteIntoForm = (quote: QuoteRecord) => {
+    resetBookingFields()
     setEditingQuoteId(quote.id)
     setEditingShareToken(quote.share_token || null)
     setEditingQuoteNumber(quote.quote_number || null)
@@ -702,6 +802,7 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
     setEditingQuoteNumber(null)
     setEditingLeadId(null)
     applyLeadDefaults()
+    resetBookingFields()
   }
 
   return (
@@ -935,6 +1036,171 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
           placeholder="Scheduling, access, scope, or payment notes"
           className="w-full rounded-lg bg-[var(--color-surface)] border border-white/10 px-3 py-2 text-sm text-white"
         />
+      </div>
+
+      <div className="space-y-3 rounded-lg border border-white/10 p-3 bg-black/5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h5 className="text-sm text-white font-semibold">Schedule first booking (optional)</h5>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Same details as “Schedule First Booking” modal. If enabled, the booking is created when you save the quote.
+            </p>
+          </div>
+          <label className="inline-flex items-center gap-2 text-sm text-white">
+            <input
+              type="checkbox"
+              checked={scheduleBooking}
+              onChange={(e) => {
+                setScheduleBooking(e.target.checked)
+                setBookingError(null)
+              }}
+              disabled={!leadId}
+            />
+            <span className={leadId ? '' : 'text-[var(--color-text-muted)]'}>Schedule with save</span>
+          </label>
+        </div>
+
+        {!leadId && (
+          <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs">
+            Extract or select the lead first to create a booking.
+          </div>
+        )}
+
+        {scheduleBooking && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider">Date</label>
+                <input
+                  type="date"
+                  value={bookingDate}
+                  onChange={(e) => setBookingDate(e.target.value)}
+                  className="w-full rounded-lg bg-[var(--color-surface)] border border-white/10 px-3 py-2 text-sm text-white"
+                  required
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider">Time</label>
+                <input
+                  type="time"
+                  value={bookingTime}
+                  onChange={(e) => setBookingTime(e.target.value)}
+                  className="w-full rounded-lg bg-[var(--color-surface)] border border-white/10 px-3 py-2 text-sm text-white"
+                  required
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider">Duration</label>
+                <select
+                  value={bookingDuration}
+                  onChange={(e) => setBookingDuration(Number(e.target.value))}
+                  className="w-full rounded-lg bg-[var(--color-surface)] border border-white/10 px-3 py-2 text-sm text-white"
+                >
+                  {DURATION_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider">Repeat</label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {REPEAT_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setBookingRepeat(opt.value)}
+                    className={`px-3 py-2 text-xs rounded-lg border transition-all ${
+                      bookingRepeat === opt.value
+                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-200'
+                        : 'bg-[var(--color-surface)] border-white/10 text-white hover:bg-white/10'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {bookingRepeat !== 'none' && (
+              <div className="space-y-2 rounded-lg border border-white/10 p-3 bg-black/10">
+                <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider">End condition</label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { value: 'never', label: 'Never' },
+                    { value: 'date', label: 'Until date' },
+                    { value: 'count', label: 'After # visits' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setBookingEndType(opt.value as typeof bookingEndType)}
+                      className={`px-3 py-2 text-xs rounded-lg border transition-all ${
+                        bookingEndType === opt.value
+                          ? 'bg-teal-500/20 border-teal-500/50 text-teal-200'
+                          : 'bg-[var(--color-surface)] border-white/10 text-white hover:bg-white/10'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                {bookingEndType === 'date' && (
+                  <input
+                    type="date"
+                    value={bookingEndDate}
+                    onChange={(e) => setBookingEndDate(e.target.value)}
+                    className="w-full rounded-lg bg-[var(--color-surface)] border border-white/10 px-3 py-2 text-sm text-white"
+                  />
+                )}
+
+                {bookingEndType === 'count' && (
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="number"
+                      min={1}
+                      max={200}
+                      value={bookingOccurrenceCount}
+                      onChange={(e) => setBookingOccurrenceCount(Number(e.target.value))}
+                      className="w-24 rounded-lg bg-[var(--color-surface)] border border-white/10 px-3 py-2 text-sm text-white"
+                    />
+                    <span className="text-xs text-[var(--color-text-muted)]">visits</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider">Booking notes</label>
+              <textarea
+                value={bookingNotes}
+                onChange={(e) => setBookingNotes(e.target.value)}
+                rows={2}
+                placeholder="Access, parking, or cleaner notes (optional)"
+                className="w-full rounded-lg bg-[var(--color-surface)] border border-white/10 px-3 py-2 text-sm text-white"
+              />
+              <p className="text-[11px] text-[var(--color-text-muted)]">
+                Timezone: {DEFAULT_TIMEZONE}. Lead status is set to Job Won when the booking is created.
+              </p>
+            </div>
+
+            {bookingStatusMessage && (
+              <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 text-xs">
+                {bookingStatusMessage}
+              </div>
+            )}
+
+            {bookingError && (
+              <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-200 text-xs">
+                {bookingError}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">

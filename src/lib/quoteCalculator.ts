@@ -68,6 +68,7 @@ export type QuoteInput = {
   customAddons: CustomAddOn[]
   clientHourlyRate: number
   cleanerHourlyRate: number
+  cleanerRateType: 'hour' | 'job'
   discountApplied: boolean
   discountPercentage: number
   depositPercentage: number
@@ -124,7 +125,10 @@ export function calculateQuote(input: QuoteInput): QuoteResult {
   }
 
   validatePositive(input.clientHourlyRate, 'Client hourly rate')
-  validatePositive(input.cleanerHourlyRate, 'Cleaner hourly rate')
+  validatePositive(
+    input.cleanerHourlyRate,
+    input.cleanerRateType === 'job' ? 'Cleaner job pay' : 'Cleaner hourly rate'
+  )
   validatePercent(input.discountPercentage, 'Discount percentage')
   validatePercent(input.depositPercentage, 'Deposit percentage')
 
@@ -165,7 +169,10 @@ export function calculateQuote(input: QuoteInput): QuoteResult {
   const totalIncGst = round2(netRevenue + gst)
 
   const totalLaborHours = mainServiceHours + totalAddOnHours
-  const cleanerPay = round2(totalLaborHours * input.cleanerHourlyRate)
+  const cleanerPay =
+    input.cleanerRateType === 'job'
+      ? round2(input.cleanerHourlyRate)
+      : round2(totalLaborHours * input.cleanerHourlyRate)
   const profit = round2(netRevenue - cleanerPay)
   const profitMarginPct = netRevenue > 0 ? round1((profit / netRevenue) * 100) : 0
   const profitPerHour = totalLaborHours > 0 ? round2(profit / totalLaborHours) : 0

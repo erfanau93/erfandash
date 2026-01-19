@@ -594,7 +594,19 @@ export default function Lead() {
       }
 
       // Filter for lead emails based on subject patterns
-      const leadEmails: LeadEmail[] = filteredEmails
+      // Deduplicate by message_id first to prevent showing the same email multiple times
+      const seenMessageIds = new Set<string>()
+      const uniqueFilteredEmails = filteredEmails.filter((email: DialpadEmail) => {
+        if (email.message_id && seenMessageIds.has(email.message_id)) {
+          return false
+        }
+        if (email.message_id) {
+          seenMessageIds.add(email.message_id)
+        }
+        return true
+      })
+
+      const leadEmails: LeadEmail[] = uniqueFilteredEmails
         .filter((email: DialpadEmail) => isLeadEmail(email.subject))
         .map((email: DialpadEmail) => ({
           ...email,
@@ -615,9 +627,19 @@ export default function Lead() {
             // Still set leads even if extracted leads query fails
             setLeads(leadEmails)
           } else {
+            // Deduplicate extracted leads by id (shouldn't happen, but safety check)
+            const seenExtractedIds = new Set<string>()
+            const uniqueExtractedLeads = (extractedLeads || []).filter((lead: any) => {
+              if (seenExtractedIds.has(lead.id)) {
+                return false
+              }
+              seenExtractedIds.add(lead.id)
+              return true
+            })
+
             // Create a map of email_id to extracted lead data
             const extractedMap = new Map(
-              (extractedLeads || []).map(lead => [lead.email_id, lead])
+              uniqueExtractedLeads.map(lead => [lead.email_id, lead])
             )
 
             // Add extracted lead data to lead emails

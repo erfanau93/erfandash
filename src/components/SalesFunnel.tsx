@@ -68,6 +68,8 @@ export default function SalesFunnel() {
   const [activeColumn, setActiveColumn] = useState<string>('')
   const [callingLeadId, setCallingLeadId] = useState<string | null>(null)
   const [callError, setCallError] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [quoteLead, setQuoteLead] = useState<ExtractedLead | null>(null)
   const [bookingLead, setBookingLead] = useState<ExtractedLead | null>(null)
   const [pendingJobWonLead, setPendingJobWonLead] = useState<{ lead: ExtractedLead; fromStatus: string } | null>(null)
@@ -221,6 +223,32 @@ export default function SalesFunnel() {
     }
   }
 
+  const handleDeleteLead = async (lead: ExtractedLead) => {
+    if (!lead.id) return
+    const confirmText = lead.name ? `Remove ${lead.name}? This will delete the lead and any linked bookings.` : 'Remove this lead?'
+    if (!window.confirm(confirmText)) return
+
+    setDeleteError(null)
+    setDeletingId(lead.id)
+    setLeads((prev) => prev.filter((l) => l.id !== lead.id))
+    try {
+      const { error: deleteError } = await supabase
+        .from('extracted_leads')
+        .delete()
+        .eq('id', lead.id)
+      if (deleteError) throw deleteError
+      if (quoteLead?.id === lead.id) setQuoteLead(null)
+      if (bookingLead?.id === lead.id) setBookingLead(null)
+      if (pendingJobWonLead?.lead.id === lead.id) setPendingJobWonLead(null)
+    } catch (err) {
+      console.error('Error deleting lead:', err)
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete lead')
+      fetchLeads()
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   useEffect(() => {
     fetchLeads()
     const channel = supabase
@@ -295,9 +323,9 @@ export default function SalesFunnel() {
           </div>
         </div>
 
-        {(error || callError) && (
+        {(error || callError || deleteError) && (
           <div className="mt-1.5 px-2 py-1 rounded bg-red-500/20 border border-red-500/30 text-red-200 text-[10px]">
-            {error || callError}
+            {error || callError || deleteError}
           </div>
         )}
       </header>
@@ -359,10 +387,21 @@ export default function SalesFunnel() {
                             setDraggingId(null)
                             setActiveColumn('')
                           }}
-                          className={`rounded-lg border border-white/10 bg-black/30 p-2 cursor-grab active:cursor-grabbing transition-all hover:border-white/20 hover:bg-black/40 ${
+                          className={`relative rounded-lg border border-white/10 bg-black/30 p-2 cursor-grab active:cursor-grabbing transition-all hover:border-white/20 hover:bg-black/40 ${
                             draggingId === lead.id ? 'opacity-50 scale-95' : ''
                           } ${savingId === lead.id ? 'animate-pulse' : ''}`}
                         >
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDeleteLead(lead)
+                            }}
+                            disabled={deletingId === lead.id}
+                            className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500/20 hover:bg-red-500/30 text-red-200 text-[10px] flex items-center justify-center disabled:opacity-50"
+                            title="Remove lead"
+                          >
+                            x
+                          </button>
                           <p className="text-white text-xs font-medium truncate">{lead.name || 'No name'}</p>
                           <p className="text-white/50 text-[10px] truncate">
                             {lead.phone_number || lead.email || '—'}

@@ -254,6 +254,55 @@ type PendingQuoteNav = {
   editQuoteId: string | null
 }
 
+// Deduplicate strictly by call_id (guaranteed unique by Dialpad).
+// If a row has no call_id, we keep it (no secondary signature).
+const dedupeCallsBySignature = (calls: DialpadCall[]) => {
+  const seenCallIds = new Set<string>()
+  const deduped: DialpadCall[] = []
+
+  for (const call of calls) {
+    if (call.call_id) {
+      if (seenCallIds.has(call.call_id)) continue
+      seenCallIds.add(call.call_id)
+    }
+    deduped.push(call)
+  }
+
+  return deduped
+}
+
+// Deduplicate SMS strictly by message_id (unique per SMS). Keep rows without message_id.
+const dedupeSmsById = (sms: DialpadSms[]) => {
+  const seenMessageIds = new Set<string>()
+  const deduped: DialpadSms[] = []
+
+  for (const msg of sms) {
+    if (msg.message_id) {
+      if (seenMessageIds.has(msg.message_id)) continue
+      seenMessageIds.add(msg.message_id)
+    }
+    deduped.push(msg)
+  }
+
+  return deduped
+}
+
+// Deduplicate emails strictly by message_id (unique per email). Keep rows without message_id.
+const dedupeEmailsById = (emails: DialpadEmail[]) => {
+  const seenMessageIds = new Set<string>()
+  const deduped: DialpadEmail[] = []
+
+  for (const email of emails) {
+    if (email.message_id) {
+      if (seenMessageIds.has(email.message_id)) continue
+      seenMessageIds.add(email.message_id)
+    }
+    deduped.push(email)
+  }
+
+  return deduped
+}
+
 export default function Dashboard() {
   const [metrics, setMetrics] = useState<Metrics>({
     uniqueCalls: 0,
@@ -274,6 +323,8 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null)
   const [leadStatusError, setLeadStatusError] = useState<string | null>(null)
   const [leadCallError, setLeadCallError] = useState<string | null>(null)
+  const [deleteLeadError, setDeleteLeadError] = useState<string | null>(null)
+  const [deletingLeadId, setDeletingLeadId] = useState<string | null>(null)
   const [callingLeadId, setCallingLeadId] = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
@@ -307,37 +358,28 @@ export default function Dashboard() {
   const fetchMetrics = useCallback(async () => {
     try {
       setError(null)
-      const todayStart = getStartOfToday()
-      
-      // For comparison chart, fetch last 3 days of data
-      const threeDaysAgo = subDays(new Date(), 3)
-      const threeDaysAgoUTC = new Date(Date.UTC(
-        threeDaysAgo.getUTCFullYear(),
-        threeDaysAgo.getUTCMonth(),
-        threeDaysAgo.getUTCDate(),
-        0, 0, 0, 0
-      )).toISOString()
+      const todayStartIso = getStartOfToday()
 
-      // Determine date range based on selected date
-      let dateStart = todayStart
-      let dateEnd = new Date().toISOString()
-      
-      if (selectedDate) {
-        const selectedStart = new Date(Date.UTC(
-          selectedDate.getUTCFullYear(),
-          selectedDate.getUTCMonth(),
-          selectedDate.getUTCDate(),
-          0, 0, 0, 0
-        ))
-        const selectedEnd = new Date(Date.UTC(
-          selectedDate.getUTCFullYear(),
-          selectedDate.getUTCMonth(),
-          selectedDate.getUTCDate(),
-          23, 59, 59, 999
-        ))
-        dateStart = selectedStart.toISOString()
-        dateEnd = selectedEnd.toISOString()
-      }
+      // Determine date range based on selected date (use local day bounds so all widgets agree)
+      const dayStart = selectedDate
+        ? new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 0, 0, 0, 0)
+        : new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate(), 0, 0, 0, 0)
+      const dayEnd = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate(), 23, 59, 59, 999)
+
+      const dateStartIso = selectedDate ? dayStart.toISOString() : todayStartIso
+      const dateEndIso = dayEnd.toISOString()
+
+      // Use the start of the selected day (or today) as the anchor for comparison window
+      const comparisonAnchor = dayStart
+
+      // For comparison chart, fetch the 3-day window ending on the anchor day (local boundaries)
+      const threeDaysAgo = subDays(comparisonAnchor, 3)
+      const threeDaysAgoUTC = new Date(
+        threeDaysAgo.getFullYear(),
+        threeDaysAgo.getMonth(),
+        threeDaysAgo.getDate(),
+        0, 0, 0, 0
+      ).toISOString()
 
       // Fetch calls for date range (and last 3 days for comparison)
       const { data: calls, error: callsError } = await supabase
@@ -370,25 +412,45 @@ export default function Dashboard() {
       const typedSms = (sms || []) as DialpadSms[]
       const typedEmails = (emails || []) as DialpadEmail[]
       
+      // Debug: Log raw call count before deduplication
+      console.log(`[Dashboard] Raw calls fetched: ${typedCalls.length}`)
+      
+      const dedupedCalls = dedupeCallsBySignature(typedCalls)
+      
+      // Debug: Log deduplicated call count
+      console.log(`[Dashboard] Calls after deduplication: ${dedupedCalls.length} (removed ${typedCalls.length - dedupedCalls.length} duplicates)`)
+      
       // Store all data for charts
-      setAllCalls(typedCalls)
-      setAllSms(typedSms)
-      setAllEmails(typedEmails)
+      const dedupedSms = dedupeSmsById(typedSms)
+      const dedupedEmails = dedupeEmailsById(typedEmails)
+      setAllCalls(dedupedCalls)
+      setAllSms(dedupedSms)
+      setAllEmails(dedupedEmails)
 
       // Filter data for selected date (or today if none selected)
-      const filteredCalls = typedCalls.filter(c => {
-        const callDate = new Date(c.created_at)
-        return callDate >= new Date(dateStart) && callDate <= new Date(dateEnd)
+      // Use direct ISO string comparison to avoid timezone issues
+      const filteredCalls = dedupedCalls.filter(c => {
+        const callTs = new Date(c.created_at).getTime()
+        return callTs >= dayStart.getTime() && callTs <= dayEnd.getTime()
       })
       
-      const filteredSms = typedSms.filter(s => {
-        const smsDate = new Date(s.created_at)
-        return smsDate >= new Date(dateStart) && smsDate <= new Date(dateEnd)
+      // Debug: Log filtered call count and date range
+      console.log(`[Dashboard] Date range: ${dateStartIso} to ${dateEndIso}`)
+      console.log(`[Dashboard] Calls after date filtering: ${filteredCalls.length}`)
+      if (filteredCalls.length > 0) {
+        const firstCall = filteredCalls[0].created_at
+        const lastCall = filteredCalls[filteredCalls.length - 1].created_at
+        console.log(`[Dashboard] First call in range: ${firstCall}, Last call: ${lastCall}`)
+      }
+      
+      const filteredSms = dedupedSms.filter(s => {
+        const smsTs = new Date(s.created_at).getTime()
+        return smsTs >= dayStart.getTime() && smsTs <= dayEnd.getTime()
       })
 
-      const filteredEmails = typedEmails.filter(e => {
-        const emailDate = new Date(e.created_at)
-        return emailDate >= new Date(dateStart) && emailDate <= new Date(dateEnd)
+      const filteredEmails = dedupedEmails.filter(e => {
+        const emailTs = new Date(e.created_at).getTime()
+        return emailTs >= dayStart.getTime() && emailTs <= dayEnd.getTime()
       })
 
       // Calculate metrics for selected date
@@ -426,8 +488,8 @@ export default function Dashboard() {
         .map((e) => e.id)
 
       const leadFilters = [
-        `and(created_at.gte.${dateStart},created_at.lte.${dateEnd})`,
-        `and(extracted_at.gte.${dateStart},extracted_at.lte.${dateEnd})`,
+        `and(created_at.gte.${dateStartIso},created_at.lte.${dateEndIso})`,
+        `and(extracted_at.gte.${dateStartIso},extracted_at.lte.${dateEndIso})`,
       ]
 
       if (leadEmailIds.length > 0) {
@@ -450,8 +512,18 @@ export default function Dashboard() {
         if (extractedLeadsError) {
           console.error('Error fetching extracted leads:', extractedLeadsError)
         } else if (extractedLeads) {
+          // Deduplicate extracted leads by id (in case OR query returns duplicates)
+          const seenLeadIds = new Set<string>()
+          const uniqueExtractedLeads = extractedLeads.filter((lead: any) => {
+            if (seenLeadIds.has(lead.id)) {
+              return false
+            }
+            seenLeadIds.add(lead.id)
+            return true
+          })
+
           const emailMap = new Map(filteredEmails.map((e) => [e.id, e]))
-          extractedLeadsData = extractedLeads.map((lead: any) => {
+          extractedLeadsData = uniqueExtractedLeads.map((lead: any) => {
             const email = emailMap.get(lead.email_id)
             const combinedLead: ExtractedLead = {
               ...lead,
@@ -475,8 +547,8 @@ export default function Dashboard() {
         const { data: quotesData, error: quotesError } = await supabase
           .from('quotes')
           .select('lead_id, created_at')
-          .gte('created_at', dateStart)
-          .lte('created_at', dateEnd)
+          .gte('created_at', dateStartIso)
+          .lte('created_at', dateEndIso)
 
         if (quotesError) {
           console.error('Error fetching quotes for metrics:', quotesError)
@@ -874,6 +946,25 @@ export default function Dashboard() {
       setLeadCallError(err instanceof Error ? err.message : 'Failed to initiate call')
     } finally {
       setCallingLeadId(null)
+    }
+  }
+
+  const handleDeleteLead = async (lead: ExtractedLead) => {
+    if (!lead.id) return
+    const confirmText = lead.name ? `Remove ${lead.name}? This will delete the lead and any linked bookings.` : 'Remove this lead?'
+    if (!window.confirm(confirmText)) return
+    setDeleteLeadError(null)
+    setDeletingLeadId(lead.id)
+    setExtractedLeads((prev) => prev.filter((l) => l.id !== lead.id))
+    try {
+      const { error: deleteError } = await supabase.from('extracted_leads').delete().eq('id', lead.id)
+      if (deleteError) throw deleteError
+    } catch (err) {
+      console.error('Error deleting lead:', err)
+      setDeleteLeadError(err instanceof Error ? err.message : 'Failed to delete lead')
+      fetchMetrics()
+    } finally {
+      setDeletingLeadId(null)
     }
   }
 
@@ -1425,6 +1516,11 @@ export default function Dashboard() {
                 {leadCallError}
               </div>
             )}
+            {deleteLeadError && (
+              <div className="mx-4 mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded text-red-300 text-xs">
+                {deleteLeadError}
+              </div>
+            )}
 
             <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
               {showManualLeadForm && (
@@ -1597,11 +1693,22 @@ export default function Dashboard() {
                             )}
                           </div>
                         </div>
+                      <div className="flex flex-col items-end gap-1">
                         {lead.status && (
                           <span className={`px-2 py-1 text-[11px] rounded-full font-medium ${statusStyle.pillBg} ${statusStyle.pillText}`}>
                             {lead.status}
                           </span>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteLead(lead)}
+                          disabled={deletingLeadId === lead.id}
+                          className="w-6 h-6 rounded-full bg-red-500/15 hover:bg-red-500/25 text-red-200 text-[11px] flex items-center justify-center disabled:opacity-50"
+                          title="Remove lead"
+                        >
+                          x
+                        </button>
+                      </div>
                       </div>
 
                       <div className="flex items-center gap-2 flex-wrap">
@@ -1685,7 +1792,7 @@ export default function Dashboard() {
         {/* Charts Section */}
         <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Day Comparison Chart */}
-          <DayComparisonChart calls={allCalls} sms={allSms} emails={allEmails} isLoading={isLoading} />
+      <DayComparisonChart calls={allCalls} sms={allSms} emails={allEmails} selectedDate={selectedDate} isLoading={isLoading} />
           
           {/* Hourly Activity */}
           <HourlyActivity calls={allCalls} selectedDate={selectedDate} isLoading={isLoading} />
@@ -1695,7 +1802,7 @@ export default function Dashboard() {
         <Lead />
 
         {/* Communications Log */}
-        <CommunicationsLog />
+        <CommunicationsLog selectedDate={selectedDate} />
 
         {/* Footer */}
         <footer className="mt-12 text-center text-[var(--color-text-muted)] text-sm">

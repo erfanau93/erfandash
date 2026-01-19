@@ -15,19 +15,20 @@ interface Props {
   calls: Array<{ created_at: string; direction: string; duration: number }>
   sms: Array<{ created_at: string; direction: string }>
   emails: Array<{ created_at: string; direction: string }>
+  selectedDate: Date | null
   isLoading: boolean
 }
 
-export default function DayComparisonChart({ calls, sms, emails, isLoading }: Props) {
+export default function DayComparisonChart({ calls, sms, emails, selectedDate, isLoading }: Props) {
   const chartData = useMemo(() => {
     const days: DayData[] = []
-    const today = new Date()
+    const anchor = selectedDate || new Date()
     
-    // Get data for yesterday, today, and tomorrow
+    // Get data for yesterday, today, and tomorrow (relative to selected day if provided)
     for (let i = -1; i <= 1; i++) {
-      const date = subDays(today, -i)
-      const dayStart = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0))
-      const dayEnd = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999))
+      const date = subDays(anchor, -i)
+      const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0)
+      const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999)
       
       const dayCalls = calls.filter(c => {
         const callDate = new Date(c.created_at)
@@ -45,9 +46,13 @@ export default function DayComparisonChart({ calls, sms, emails, isLoading }: Pr
       })
       
       let label = format(date, 'EEE M/d')
-      if (isToday(date)) label = 'Today'
-      else if (isYesterday(date)) label = 'Yesterday'
-      else if (isTomorrow(date)) label = 'Tomorrow'
+      if (!selectedDate) {
+        if (isToday(date)) label = 'Today'
+        else if (isYesterday(date)) label = 'Yesterday'
+        else if (isTomorrow(date)) label = 'Tomorrow'
+      } else if (i === 0) {
+        label = 'Selected'
+      }
       
       days.push({
         date: label,
@@ -60,7 +65,7 @@ export default function DayComparisonChart({ calls, sms, emails, isLoading }: Pr
     }
     
     return days.reverse() // Show yesterday, today, tomorrow
-  }, [calls, sms, emails])
+  }, [calls, sms, emails, selectedDate])
 
   if (isLoading) {
     return (

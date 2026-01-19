@@ -8,6 +8,8 @@ import CompletedJobs from './components/CompletedJobs'
 import Cleaners from './components/Cleaners'
 import CleanersPayout from './components/CleanersPayout'
 import Dispatch from './components/Dispatch'
+import QuotesSent from './components/QuotesSent'
+import RepeatCustomers from './components/RepeatCustomers'
 import JobModal from './components/JobModal'
 import GlobalSearch from './components/GlobalSearch'
 import MainNav from './components/MainNav'
@@ -29,6 +31,8 @@ function getBreadcrumbs(path: string): Array<{ label: string; href?: string }> {
     '/cleaners-payout': 'Cleaners Payout',
     '/completed': 'Completed Jobs',
     '/completed-jobs': 'Completed Jobs',
+    '/quotes-sent': 'Quotes Sent',
+    '/repeat-customers': 'Repeat Customers',
   }
 
   const breadcrumbs: Array<{ label: string; href?: string }> = [
@@ -294,6 +298,38 @@ function App() {
         <GlobalSearch />
         <NewLeadNotifier />
         <CleanersPayout />
+        <JobModal />
+      </div>
+    )
+  }
+
+  if (path.endsWith('/quotes-sent')) {
+    return (
+      <div className="animated-bg min-h-screen">
+        {logoutButton}
+        <MainNav />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+          <Breadcrumbs items={breadcrumbs} />
+        </div>
+        <GlobalSearch />
+        <NewLeadNotifier />
+        <QuotesSent />
+        <JobModal />
+      </div>
+    )
+  }
+
+  if (path.endsWith('/repeat-customers')) {
+    return (
+      <div className="animated-bg min-h-screen">
+        {logoutButton}
+        <MainNav />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+          <Breadcrumbs items={breadcrumbs} />
+        </div>
+        <GlobalSearch />
+        <NewLeadNotifier />
+        <RepeatCustomers />
         <JobModal />
       </div>
     )

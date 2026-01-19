@@ -1,11 +1,13 @@
 const NAV_ITEMS = [
   { label: 'Dashboard', href: '/' },
   { label: 'Sales Funnel', href: '/salesfunnel' },
+  { label: 'Quotes Sent', href: '/quotes-sent' },
   { label: 'Calendar', href: '/calendar' },
   { label: 'Dispatch', href: '/dispatch' },
   { label: 'Cleaners', href: '/cleaners' },
   { label: 'Completed Jobs', href: '/completed' },
   { label: 'Cleaners Payout', href: '/cleaners-payout' },
+  { label: 'Repeat Customers', href: '/repeat-customers' },
 ]
 
 const normalizePath = (path: string) => {

@@ -106,6 +106,8 @@ function EventDetailModal({
   cleaners,
   onAssignCleaner,
   onUpdateSeriesAddress,
+  onDeleteLead,
+  deletingLeadId,
   mapboxToken,
   mapboxError,
 }: {
@@ -121,6 +123,8 @@ function EventDetailModal({
     lat: number | null,
     lng: number | null
   ) => Promise<void>
+  onDeleteLead: (leadId: string) => Promise<void>
+  deletingLeadId: string | null
   mapboxToken: string | null
   mapboxError: string | null
 }) {
@@ -296,6 +300,16 @@ function EventDetailModal({
               </p>
             </div>
             <div className="flex items-center gap-2">
+              {lead?.id && (
+                <button
+                  type="button"
+                  onClick={() => onDeleteLead(lead.id)}
+                  disabled={deletingLeadId === lead.id}
+                  className="px-3 py-2 text-xs rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/30 disabled:opacity-50"
+                >
+                  Remove lead
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() =>
@@ -592,6 +606,7 @@ export default function Calendar() {
   const [savingReview, setSavingReview] = useState(false)
   const [mapboxToken, setMapboxToken] = useState<string | null>(null)
   const [mapboxError, setMapboxError] = useState<string | null>(null)
+  const [deletingLeadId, setDeletingLeadId] = useState<string | null>(null)
 
   const renderEventContent = useCallback((arg: EventContentArg) => {
     const { event, timeText } = arg
@@ -897,6 +912,27 @@ export default function Calendar() {
     fetchBookings(dateRange.start, dateRange.end)
   }, [events, fetchBookings, dateRange])
 
+  const handleDeleteLead = useCallback(
+    async (leadId: string) => {
+      const confirmText = 'Remove this lead? This will delete the lead and any linked bookings.'
+      if (!window.confirm(confirmText)) return
+      setActionError(null)
+      setDeletingLeadId(leadId)
+      try {
+        const { error } = await supabase.from('extracted_leads').delete().eq('id', leadId)
+        if (error) throw error
+        setSelectedEvent(null)
+        fetchBookings(dateRange.start, dateRange.end)
+      } catch (err) {
+        console.error('Error deleting lead:', err)
+        setActionError(err instanceof Error ? err.message : 'Failed to delete lead')
+      } finally {
+        setDeletingLeadId(null)
+      }
+    },
+    [dateRange, fetchBookings]
+  )
+
   // Initial fetch on mount - get current week's data
   useEffect(() => {
     const now = new Date()
@@ -1068,6 +1104,8 @@ export default function Calendar() {
           cleaners={cleaners}
           onAssignCleaner={handleAssignCleaner}
           onUpdateSeriesAddress={handleUpdateSeriesAddress}
+          onDeleteLead={handleDeleteLead}
+          deletingLeadId={deletingLeadId}
           mapboxToken={mapboxToken}
           mapboxError={mapboxError}
         />

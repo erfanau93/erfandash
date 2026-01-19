@@ -10,19 +10,6 @@ type Lead = {
   created_at?: string | null
 }
 
-type BookingSeries = {
-  id: string
-  lead_id: string
-  quote_id?: string | null
-  title: string
-  starts_at: string
-  duration_minutes: number
-  rrule?: string | null
-  status: string
-  notes?: string | null
-  created_at: string
-}
-
 type SeriesSummary = {
   id: string
   starts_at: string

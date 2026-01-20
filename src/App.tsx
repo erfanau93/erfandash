@@ -10,6 +10,7 @@ import CleanersPayout from './components/CleanersPayout'
 import Dispatch from './components/Dispatch'
 import QuotesSent from './components/QuotesSent'
 import RepeatCustomers from './components/RepeatCustomers'
+import TodoPage from './components/TodoPage'
 import JobModal from './components/JobModal'
 import GlobalSearch from './components/GlobalSearch'
 import MainNav from './components/MainNav'
@@ -33,6 +34,7 @@ function getBreadcrumbs(path: string): Array<{ label: string; href?: string }> {
     '/completed-jobs': 'Completed Jobs',
     '/quotes-sent': 'Quotes Sent',
     '/repeat-customers': 'Repeat Customers',
+    '/todo': 'Todo',
   }
 
   const breadcrumbs: Array<{ label: string; href?: string }> = [
@@ -330,6 +332,22 @@ function App() {
         <GlobalSearch />
         <NewLeadNotifier />
         <RepeatCustomers />
+        <JobModal />
+      </div>
+    )
+  }
+
+  if (path.endsWith('/todo')) {
+    return (
+      <div className="animated-bg min-h-screen">
+        {logoutButton}
+        <MainNav />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+          <Breadcrumbs items={breadcrumbs} />
+        </div>
+        <GlobalSearch />
+        <NewLeadNotifier />
+        <TodoPage />
         <JobModal />
       </div>
     )

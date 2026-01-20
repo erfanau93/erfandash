@@ -119,7 +119,6 @@ export default function TodoPage() {
 
   // Filter
   const [filter, setFilter] = useState<'all' | 'pending' | 'completed'>('pending')
-  const [typeFilter, setTypeFilter] = useState<TodoType | 'all'>('all')
 
   const today = useMemo(() => startOfDay(new Date()), [])
   const isTodayFriday = isFriday(today)
@@ -142,8 +141,6 @@ export default function TodoPage() {
     setError(null)
 
     try {
-      const now = new Date()
-      const todayStr = format(today, 'yyyy-MM-dd')
       const fiveDaysFromNow = addDays(today, 5)
       const twoDaysAgo = subDays(today, 2)
 

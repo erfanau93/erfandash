@@ -48,6 +48,7 @@ interface BookingSeries {
 interface BookingOccurrence {
   id: string
   series_id: string
+  quote_id?: string | null
   start_at: string
   end_at: string
   status: string
@@ -285,7 +286,7 @@ export default function CompletedJobs() {
       const quoteIds = Array.from(
         new Set(
           allOccurrences
-            .map((occ) => occ?.series?.quote_id)
+            .map((occ) => occ?.quote_id || occ?.series?.quote_id)
             .filter(Boolean)
         )
       ) as string[]
@@ -337,7 +338,8 @@ export default function CompletedJobs() {
         list.map((occ) => {
           const series = occ.series as BookingSeries
           const lead = (series?.lead as Lead) || null
-          const linkedQuote = series?.quote_id ? quotesById[series.quote_id] : null
+          const linkedQuoteId = occ?.quote_id || series?.quote_id
+          const linkedQuote = linkedQuoteId ? quotesById[linkedQuoteId] : null
           // Fallback only for legacy bookings created before quote_id requirement
           const fallbackQuote = series?.quote_id ? null : (lead?.id ? latestQuotes[lead.id] : null)
           const quote = linkedQuote || fallbackQuote || null
@@ -515,6 +517,8 @@ export default function CompletedJobs() {
         body: JSON.stringify({
           amount_cents: amountCents,
           currency: 'aud',
+          occurrenceId: occurrence.id,
+          quoteId: quote?.id || '',
           customerName: lead?.name || '',
           customerEmail: lead?.email || '',
           description,

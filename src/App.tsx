@@ -16,6 +16,7 @@ import GlobalSearch from './components/GlobalSearch'
 import MainNav from './components/MainNav'
 import Breadcrumbs from './components/Breadcrumbs'
 import NewLeadNotifier from './components/NewLeadNotifier'
+import ManualTodoPopup from './components/ManualTodoPopup'
 
 function getBreadcrumbs(path: string): Array<{ label: string; href?: string }> {
   const normalizedPath = path.replace(/\/+$/, '') || '/'
@@ -151,6 +152,7 @@ function App() {
   const [isAuthed, setIsAuthed] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
   const [error, setError] = useState<string>()
+  const [showWebhookLogs, setShowWebhookLogs] = useState(false)
 
   useEffect(() => {
     if (localStorage.getItem('authUser') === 'admin123') {
@@ -219,6 +221,7 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <ManualTodoPopup />
         <SalesFunnel />
         <JobModal />
       </div>
@@ -235,6 +238,7 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <ManualTodoPopup />
         <Calendar />
         <JobModal />
       </div>
@@ -251,6 +255,7 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <ManualTodoPopup />
         <CompletedJobs />
         <JobModal />
       </div>
@@ -267,6 +272,7 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <ManualTodoPopup />
         <Cleaners />
         <JobModal />
       </div>
@@ -283,6 +289,7 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <ManualTodoPopup />
         <Dispatch />
         <JobModal />
       </div>
@@ -299,6 +306,7 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <ManualTodoPopup />
         <CleanersPayout />
         <JobModal />
       </div>
@@ -315,6 +323,7 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <ManualTodoPopup />
         <QuotesSent />
         <JobModal />
       </div>
@@ -331,6 +340,7 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <ManualTodoPopup />
         <RepeatCustomers />
         <JobModal />
       </div>
@@ -347,6 +357,7 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <ManualTodoPopup />
         <TodoPage />
         <JobModal />
       </div>
@@ -362,10 +373,30 @@ function App() {
       </div>
       <GlobalSearch />
       <NewLeadNotifier />
+      <ManualTodoPopup />
       <Dashboard />
-      <div className="max-w-7xl mx-auto px-8 pb-8">
-        <WebhookDebug />
-      </div>
+      {showWebhookLogs && (
+        <div className="fixed inset-x-0 bottom-20 z-40">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4">
+            <div className="relative">
+              <button
+                onClick={() => setShowWebhookLogs(false)}
+                className="absolute -top-3 right-0 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs px-3 py-1 backdrop-blur"
+              >
+                Close
+              </button>
+              <WebhookDebug />
+            </div>
+          </div>
+        </div>
+      )}
+      <button
+        onClick={() => setShowWebhookLogs((prev) => !prev)}
+        className="fixed bottom-4 right-4 z-40 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-medium px-4 py-2 backdrop-blur"
+        aria-expanded={showWebhookLogs}
+      >
+        {showWebhookLogs ? 'Hide Logs' : 'Logs'}
+      </button>
       <JobModal />
     </div>
   )

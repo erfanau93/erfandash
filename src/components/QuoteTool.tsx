@@ -197,6 +197,7 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
         .from('quotes')
         .select('*')
         .eq('lead_id', leadId)
+        .is('base_quote_id', null)
         .order('created_at', { ascending: false })
 
       if (error) {

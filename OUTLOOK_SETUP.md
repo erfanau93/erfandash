@@ -149,7 +149,7 @@ CREATE EXTENSION IF NOT EXISTS pg_net;
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
 -- Create a cron job to renew webhook subscription daily
--- This will create a new subscription if one doesn't exist, or replace expired ones
+-- Safe to call daily: the setup function deduplicates and renews the existing subscription
 SELECT cron.schedule(
   'renew-outlook-webhook',
   '0 0 * * *', -- Daily at midnight UTC
@@ -203,11 +203,13 @@ jobs:
             -d '{"action": "create"}'
 ```
 
-**Note**: The renewal uses `"action": "create"` which will create a new subscription. Microsoft Graph will automatically handle replacing old subscriptions. This approach is simpler than trying to track and renew specific subscription IDs.
+**Note**: The renewal uses `"action": "create"`. The setup function is idempotent and will renew the existing Outlook subscription while removing duplicates if any exist.
 
 ## Step 7: Set Up Manual Sync (Backup/Alternative)
 
-As a backup or alternative to webhooks, you can set up automatic email syncing using a cron job:
+As a backup or alternative to webhooks, you can set up automatic email syncing using a cron job.
+If you enable both webhook notifications and frequent syncs, make sure your sync function deduplicates by `message_id`
+to avoid repeated inserts for the same email.
 
 ### Using Supabase Cron Jobs
 

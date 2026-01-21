@@ -18,6 +18,7 @@ import { playSaveSound } from '../lib/sounds'
 interface BookingOccurrence {
   id: string
   series_id: string
+  quote_id?: string | null
   start_at: string
   end_at: string
   status: string
@@ -124,7 +125,7 @@ export default function CleanersPayout() {
         new Set(allOccurrences.map((occ) => occ.cleaner_id).filter(Boolean))
       ) as string[]
       const quoteIds = Array.from(
-        new Set(allOccurrences.map((occ) => occ.series?.quote_id).filter(Boolean))
+        new Set(allOccurrences.map((occ) => occ.quote_id || occ.series?.quote_id).filter(Boolean))
       ) as string[]
 
       // Fetch cleaners
@@ -186,7 +187,8 @@ export default function CleanersPayout() {
       const mappedRows: PayoutRow[] = allOccurrences.map((occ: any) => {
         const cleanerId = occ.cleaner_id
         const cleaner = cleanerId ? cleanersById[cleanerId] || null : null
-        const quote = occ.series?.quote_id ? quotesById[occ.series.quote_id] || null : null
+        const quoteId = occ.quote_id || occ.series?.quote_id
+        const quote = quoteId ? quotesById[quoteId] || null : null
         const jobTotal = quote?.total_inc_gst || 0
         const existingPayout = payoutsByOccurrence[occ.id]
 

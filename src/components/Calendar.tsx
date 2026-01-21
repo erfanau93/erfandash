@@ -35,6 +35,7 @@ interface BookingSeries {
 interface BookingOccurrence {
   id: string
   series_id: string
+  quote_id?: string | null
   start_at: string
   end_at: string
   status: string
@@ -158,7 +159,7 @@ function EventDetailModal({
 
   useEffect(() => {
     // Load the quote linked to this booking series
-    const quoteId = series?.quote_id
+    const quoteId = occurrence?.quote_id || series?.quote_id
     if (!quoteId) {
       // Fallback for legacy bookings without quote_id
       if (!lead?.id) {
@@ -211,7 +212,7 @@ function EventDetailModal({
     return () => {
       cancelled = true
     }
-  }, [series?.quote_id, lead?.id])
+  }, [occurrence?.quote_id, series?.quote_id, lead?.id])
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -797,6 +798,19 @@ export default function Calendar() {
       return
     }
 
+    // Best-effort: sync lead status for completed jobs
+    if (status === 'completed') {
+      try {
+        const ev = events.find((e) => e.id === occurrenceId) || selectedEvent || null
+        const leadId = ev?.extendedProps?.series?.lead_id || ev?.extendedProps?.lead?.id || null
+        if (leadId) {
+          await supabase.from('extracted_leads').update({ status: 'Jobs Completed' }).eq('id', leadId)
+        }
+      } catch (leadErr) {
+        console.warn('Failed to update lead status for completed job', leadErr)
+      }
+    }
+
     // Refresh events
     fetchBookings(dateRange.start, dateRange.end)
 
@@ -992,13 +1006,20 @@ export default function Calendar() {
           <span className="text-sm text-gray-400">Status:</span>
           {Object.entries(STATUS_COLORS).map(([status, colors]) => (
             <div key={status} className="flex items-center gap-2">
-              <div 
-                className="w-3 h-3 rounded" 
+              <div
+                className="w-3 h-3 rounded"
                 style={{ backgroundColor: colors.bg }}
               />
               <span className="text-sm text-gray-300 capitalize">{status}</span>
             </div>
           ))}
+          <div className="flex items-center gap-2">
+            <div
+              className="w-3 h-3 rounded"
+              style={{ backgroundColor: ASSIGNED_SCHEDULED_COLORS.bg }}
+            />
+            <span className="text-sm text-gray-300">assigned</span>
+          </div>
         </div>
 
         {actionError ? (
@@ -1039,7 +1060,7 @@ export default function Calendar() {
                 editable={true}
                 selectable={true}
                 selectMirror={true}
-                dayMaxEvents={true}
+                dayMaxEvents={false}
                 weekends={true}
                 datesSet={handleDatesSet}
                 eventClick={handleEventClick}
@@ -1051,12 +1072,15 @@ export default function Calendar() {
                 expandRows={true}
                 slotEventOverlap={false}
                 eventOverlap={false}
-                eventMaxStack={3}
+                eventMaxStack={10}
+                eventMinHeight={20}
+                eventDisplay="block"
                 eventContent={renderEventContent}
                 eventClassNames={() => ['custom-calendar-event']}
                 views={{
                   dayGridMonth: {
-                    dayMaxEventRows: 4,
+                    dayMaxEventRows: false,
+                    eventDisplay: 'block',
                     eventContent: renderEventContent,
                   },
                 }}

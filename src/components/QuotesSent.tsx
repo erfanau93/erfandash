@@ -58,6 +58,20 @@ export default function QuotesSent() {
   const [sortBy, setSortBy] = useState<'date' | 'amount' | 'customer'>('date')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
 
+  const getErrorMessage = (err: unknown) => {
+    if (!err) return 'Failed to load quotes'
+    if (typeof err === 'string') return err
+    if (typeof err === 'object' && 'message' in err && typeof (err as { message?: unknown }).message === 'string') {
+      const message = (err as { message: string }).message.trim()
+      if (message) return message
+    }
+    try {
+      return JSON.stringify(err)
+    } catch {
+      return 'Failed to load quotes'
+    }
+  }
+
   const fetchQuotes = async () => {
     try {
       setError(null)
@@ -74,13 +88,21 @@ export default function QuotesSent() {
             status
           )
         `)
+        .is('base_quote_id', null)
         .order('created_at', { ascending: false })
 
-      if (quotesError) throw quotesError
+      if (quotesError) {
+        const message = getErrorMessage(quotesError)
+        console.error('Error fetching quotes:', quotesError)
+        setError(message)
+        setQuotes([])
+        return
+      }
       setQuotes((data || []) as QuoteRecord[])
     } catch (err) {
       console.error('Error fetching quotes:', err)
-      setError(err instanceof Error ? err.message : 'Failed to load quotes')
+      setError(getErrorMessage(err))
+      setQuotes([])
     } finally {
       setIsLoading(false)
     }

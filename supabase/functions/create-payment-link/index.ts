@@ -4,13 +4,14 @@
 //   STRIPE_SUCCESS_URL (optional)
 //   STRIPE_CANCEL_URL (optional)
 // Expects POST with JSON:
-//   { amount_cents, currency?, quoteId?, customerName?, customerEmail?, description?, success_url?, cancel_url? }
+//   { amount_cents, currency?, occurrenceId?, quoteId?, customerName?, customerEmail?, description?, success_url?, cancel_url? }
 
 import Stripe from 'https://esm.sh/stripe@12.18.0?target=deno'
 
 type CreatePaymentLinkPayload = {
   amount_cents: number
   currency?: string
+  occurrenceId?: string
   quoteId?: string
   customerName?: string
   customerEmail?: string
@@ -92,6 +93,7 @@ Deno.serve(async (req) => {
         },
       ],
       metadata: {
+        occurrenceId: payload.occurrenceId || '',
         quoteId: payload.quoteId || '',
         customerName: payload.customerName || '',
         customerEmail: payload.customerEmail || '',

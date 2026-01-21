@@ -111,7 +111,7 @@ export default function MainNav() {
               DP
             </div>
             <div className="flex flex-col">
-              <span className="text-white font-semibold leading-tight">Dialpad Ops</span>
+              <span className="text-white font-semibold leading-tight">Little Fish Operations</span>
               <span className="text-xs text-white/60">Communications & jobs</span>
             </div>
           </div>

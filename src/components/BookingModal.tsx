@@ -20,6 +20,47 @@ interface Quote {
   created_at: string
 }
 
+type QuoteTemplate = {
+  id: string
+  lead_id: string | null
+  quote_number?: string | null
+  address?: string | null
+  address_lat?: number | null
+  address_lng?: number | null
+  description?: string | null
+  service?: string | null
+  bedrooms?: number | null
+  bathrooms?: number | null
+  addons?: string[] | null
+  custom_addons?: any[] | null
+  hourly_rate?: number | null
+  cleaner_rate?: number | null
+  cleaner_rate_type?: string | null
+  main_service_hours?: number | null
+  add_on_hours?: number | null
+  total_hours?: number | null
+  subtotal?: number | null
+  discount_amount?: number | null
+  discount_percentage?: number | null
+  net_revenue?: number | null
+  gst?: number | null
+  total_inc_gst?: number | null
+  cleaner_pay?: number | null
+  profit?: number | null
+  margin?: number | null
+  deposit_percentage?: number | null
+  deposit_amount?: number | null
+  remaining_balance?: number | null
+  notes?: string | null
+  customer_name?: string | null
+  customer_phone?: string | null
+  customer_email?: string | null
+  email_id?: string | null
+  quote_scope?: string | null
+  base_quote_id?: string | null
+  quote_version?: number | null
+}
+
 interface BookingModalProps {
   lead: Lead
   onClose: () => void
@@ -114,6 +155,116 @@ function generateOccurrences(startDate: Date, rrule: string | null, untilDate: D
   return dates
 }
 
+async function resolveBaseQuote(quoteId: string, leadId: string) {
+  const { data: quote, error: quoteError } = await supabase
+    .from('quotes')
+    .select(
+      `
+        id, lead_id, quote_number, address, address_lat, address_lng, description, service, bedrooms, bathrooms,
+        addons, custom_addons, hourly_rate, cleaner_rate, cleaner_rate_type, main_service_hours, add_on_hours,
+        total_hours, subtotal, discount_amount, discount_percentage, net_revenue, gst, total_inc_gst, cleaner_pay,
+        profit, margin, deposit_percentage, deposit_amount, remaining_balance, notes, customer_name, customer_phone,
+        customer_email, email_id, quote_scope, base_quote_id, quote_version
+      `
+    )
+    .eq('id', quoteId)
+    .eq('lead_id', leadId)
+    .single()
+
+  if (quoteError || !quote) {
+    throw new Error('Quote not found or does not belong to this lead')
+  }
+
+  const quoteData = quote as QuoteTemplate
+  if (quoteData.quote_scope === 'occurrence_variant' && quoteData.base_quote_id) {
+    const { data: base, error: baseError } = await supabase
+      .from('quotes')
+      .select(
+        `
+          id, lead_id, quote_number, address, address_lat, address_lng, description, service, bedrooms, bathrooms,
+          addons, custom_addons, hourly_rate, cleaner_rate, cleaner_rate_type, main_service_hours, add_on_hours,
+          total_hours, subtotal, discount_amount, discount_percentage, net_revenue, gst, total_inc_gst, cleaner_pay,
+          profit, margin, deposit_percentage, deposit_amount, remaining_balance, notes, customer_name, customer_phone,
+          customer_email, email_id, quote_scope, base_quote_id, quote_version
+        `
+      )
+      .eq('id', quoteData.base_quote_id)
+      .eq('lead_id', leadId)
+      .single()
+
+    if (baseError || !base) {
+      throw new Error('Base quote not found for this lead')
+    }
+
+    return base as QuoteTemplate
+  }
+
+  return quoteData
+}
+
+async function getNextQuoteVersion(baseQuoteId: string) {
+  const { data, error } = await supabase
+    .from('quotes')
+    .select('quote_version')
+    .eq('base_quote_id', baseQuoteId)
+    .order('quote_version', { ascending: false })
+    .limit(1)
+
+  if (error || !data || data.length === 0 || data[0]?.quote_version == null) {
+    return 2
+  }
+
+  return Number(data[0].quote_version) + 1
+}
+
+function buildVariantPayload(baseQuote: QuoteTemplate, version: number) {
+  const baseNumber = baseQuote.quote_number || null
+  const quoteNumber = baseNumber ? `${baseNumber}v${version}` : null
+
+  return {
+    lead_id: baseQuote.lead_id,
+    email_id: baseQuote.email_id ?? null,
+    quote_number: quoteNumber,
+    address: baseQuote.address ?? null,
+    address_lat: baseQuote.address_lat ?? null,
+    address_lng: baseQuote.address_lng ?? null,
+    description: baseQuote.description ?? null,
+    service: baseQuote.service ?? null,
+    bedrooms: baseQuote.bedrooms ?? null,
+    bathrooms: baseQuote.bathrooms ?? null,
+    addons: baseQuote.addons ?? [],
+    custom_addons: baseQuote.custom_addons ?? [],
+    hourly_rate: baseQuote.hourly_rate ?? null,
+    cleaner_rate: baseQuote.cleaner_rate ?? null,
+    cleaner_rate_type: baseQuote.cleaner_rate_type ?? null,
+    main_service_hours: baseQuote.main_service_hours ?? null,
+    add_on_hours: baseQuote.add_on_hours ?? null,
+    total_hours: baseQuote.total_hours ?? null,
+    subtotal: baseQuote.subtotal ?? null,
+    discount_amount: baseQuote.discount_amount ?? null,
+    discount_percentage: baseQuote.discount_percentage ?? null,
+    net_revenue: baseQuote.net_revenue ?? null,
+    gst: baseQuote.gst ?? null,
+    total_inc_gst: baseQuote.total_inc_gst ?? null,
+    cleaner_pay: baseQuote.cleaner_pay ?? null,
+    profit: baseQuote.profit ?? null,
+    margin: baseQuote.margin ?? null,
+    deposit_percentage: baseQuote.deposit_percentage ?? null,
+    deposit_amount: baseQuote.deposit_amount ?? null,
+    remaining_balance: baseQuote.remaining_balance ?? null,
+    notes: baseQuote.notes ?? null,
+    customer_name: baseQuote.customer_name ?? null,
+    customer_phone: baseQuote.customer_phone ?? null,
+    customer_email: baseQuote.customer_email ?? null,
+    share_token: null,
+    accepted_at: null,
+    accepted_payment_method: null,
+    base_quote_id: baseQuote.id,
+    quote_scope: 'occurrence_variant',
+    quote_version: version,
+  }
+}
+
 async function createBookingViaEdge(payload: CreateBookingPayload) {
   try {
     // Try using supabase client first
@@ -203,23 +354,13 @@ async function createBookingDirect(payload: CreateBookingPayload) {
     throw new Error('Lead not found')
   }
 
-  // Verify quote exists and belongs to lead
-  const { data: quoteExists, error: quoteError } = await supabase
-    .from('quotes')
-    .select('id')
-    .eq('id', payload.quoteId)
-    .eq('lead_id', payload.leadId)
-    .maybeSingle()
-
-  if (quoteError || !quoteExists) {
-    throw new Error('Quote not found or does not belong to this lead')
-  }
+  const baseQuote = await resolveBaseQuote(payload.quoteId, payload.leadId)
 
   const { data: series, error: seriesError } = await supabase
     .from('booking_series')
     .insert({
       lead_id: payload.leadId,
-      quote_id: payload.quoteId,
+      quote_id: baseQuote.id,
       title: 'Regular clean',
       timezone: payload.timezone || DEFAULT_TIMEZONE,
       starts_at: startDate.toISOString(),
@@ -238,19 +379,36 @@ async function createBookingDirect(payload: CreateBookingPayload) {
   }
 
   const occurrenceDates = generateOccurrences(startDate, rrule, untilDate, maxOccurrences)
-  const occurrenceRecords = occurrenceDates.map((date) => {
+  const startingVersion = await getNextQuoteVersion(baseQuote.id)
+  const variantPayloads = occurrenceDates.map((_, index) => buildVariantPayload(baseQuote, startingVersion + index))
+
+  const { data: variants, error: variantsError } = await supabase
+    .from('quotes')
+    .insert(variantPayloads)
+    .select('id, quote_version')
+
+  if (variantsError || !variants || variants.length !== occurrenceDates.length) {
+    await supabase.from('booking_series').delete().eq('id', series.id)
+    throw new Error(variantsError?.message || 'Failed to create quote variants')
+  }
+
+  const variantIds = variants.map((v: any) => v.id)
+
+  const occurrenceRecords = occurrenceDates.map((date, index) => {
     const endDate = new Date(date.getTime() + (payload.durationMinutes || 120) * 60 * 1000)
     return {
       series_id: series.id,
       start_at: date.toISOString(),
       end_at: endDate.toISOString(),
       status: 'scheduled',
+      quote_id: variantIds[index],
     }
   })
 
   const { error: occurrencesError } = await supabase.from('booking_occurrences').insert(occurrenceRecords)
   if (occurrencesError) {
     await supabase.from('booking_series').delete().eq('id', series.id)
+    await supabase.from('quotes').delete().in('id', variantIds)
     throw new Error(occurrencesError.message || 'Failed to create booking occurrences')
   }
 
@@ -314,6 +472,7 @@ export default function BookingModal({ lead, onClose, onSuccess, onSkip }: Booki
           .from('quotes')
           .select('id, quote_number, service, total_inc_gst, created_at')
           .eq('lead_id', lead.id)
+          .is('base_quote_id', null)
           .order('created_at', { ascending: false })
 
         if (error) throw error

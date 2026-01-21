@@ -17,6 +17,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
+const resendApiKey = Deno.env.get('RESEND_API_KEY') || ''
+const jobWonNotifyEmail = Deno.env.get('JOB_WON_NOTIFY_EMAIL') || ''
+const jobWonEmailFrom = Deno.env.get('JOB_WON_EMAIL_FROM') || ''
 
 type RepeatType = 'none' | 'weekly' | 'fortnightly' | '3-weekly' | 'monthly' | '2-monthly'
 
@@ -32,6 +35,319 @@ interface CreateBookingPayload {
   notes?: string
   timezone?: string
   updateLeadStatus?: boolean
+}
+
+type QuoteTemplate = {
+  id: string
+  lead_id: string | null
+  quote_number?: string | null
+  address?: string | null
+  address_lat?: number | null
+  address_lng?: number | null
+  description?: string | null
+  service?: string | null
+  bedrooms?: number | null
+  bathrooms?: number | null
+  addons?: string[] | null
+  custom_addons?: any[] | null
+  hourly_rate?: number | null
+  cleaner_rate?: number | null
+  cleaner_rate_type?: string | null
+  main_service_hours?: number | null
+  add_on_hours?: number | null
+  total_hours?: number | null
+  subtotal?: number | null
+  discount_amount?: number | null
+  discount_percentage?: number | null
+  net_revenue?: number | null
+  gst?: number | null
+  total_inc_gst?: number | null
+  cleaner_pay?: number | null
+  profit?: number | null
+  margin?: number | null
+  deposit_percentage?: number | null
+  deposit_amount?: number | null
+  remaining_balance?: number | null
+  notes?: string | null
+  customer_name?: string | null
+  customer_phone?: string | null
+  customer_email?: string | null
+  email_id?: string | null
+  quote_scope?: string | null
+  base_quote_id?: string | null
+  quote_version?: number | null
+}
+
+function formatCurrency(value: number | null | undefined) {
+  if (value == null) return '—'
+  return new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(value)
+}
+
+function formatDateTime(date: Date, timezone: string) {
+  return new Intl.DateTimeFormat('en-AU', {
+    timeZone: timezone,
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
+}
+
+function normalizeList(value: unknown): string {
+  if (!Array.isArray(value) || value.length === 0) return 'None'
+  return value
+    .map((item) => {
+      if (typeof item === 'string') return item
+      if (item && typeof item === 'object' && 'name' in item) return String((item as any).name)
+      return JSON.stringify(item)
+    })
+    .join(', ')
+}
+
+async function sendJobWonEmail(params: {
+  lead: { id: string; name: string | null; email: string | null; phone_number?: string | null }
+  baseQuote: QuoteTemplate
+  series: any
+  occurrenceDates: Date[]
+  durationMinutes: number
+  repeatType: RepeatType
+  timezone: string
+  bookingNotes: string | null
+}) {
+  if (!resendApiKey || !jobWonNotifyEmail || !jobWonEmailFrom) {
+    console.log('Job won email skipped: missing RESEND_API_KEY / JOB_WON_NOTIFY_EMAIL / JOB_WON_EMAIL_FROM')
+    return
+  }
+
+  const { lead, baseQuote, series, occurrenceDates, durationMinutes, repeatType, timezone, bookingNotes } = params
+  const firstStart = occurrenceDates[0]
+  const occurrencePreview = occurrenceDates
+    .slice(0, 5)
+    .map((d) => formatDateTime(d, timezone))
+    .join(', ')
+  const occurrencesTotal = occurrenceDates.length
+
+  const subject = `Job Won: ${lead.name || 'Lead'} — ${series.title || 'Booking'}`
+
+  const text = [
+    `Job Won`,
+    ``,
+    `Lead: ${lead.name || 'Unknown'}`,
+    `Email: ${lead.email || '—'}`,
+    `Phone: ${lead.phone_number || '—'}`,
+    `Lead ID: ${lead.id}`,
+    ``,
+    `Booking`,
+    `Title: ${series.title || '—'}`,
+    `Timezone: ${timezone}`,
+    `Start: ${firstStart ? formatDateTime(firstStart, timezone) : '—'}`,
+    `Duration: ${durationMinutes} mins`,
+    `Repeat: ${repeatType}`,
+    `Until: ${series.until_date || '—'}`,
+    `Occurrences: ${occurrencesTotal}`,
+    `Upcoming (first 5): ${occurrencePreview || '—'}`,
+    `Notes: ${bookingNotes || '—'}`,
+    ``,
+    `Service Address: ${baseQuote.address || '—'}`,
+    ``,
+    `Quote`,
+    `Quote Number: ${baseQuote.quote_number || '—'}`,
+    `Service: ${baseQuote.service || '—'}`,
+    `Bedrooms: ${baseQuote.bedrooms ?? '—'}`,
+    `Bathrooms: ${baseQuote.bathrooms ?? '—'}`,
+    `Addons: ${normalizeList(baseQuote.addons)}`,
+    `Custom Addons: ${normalizeList(baseQuote.custom_addons)}`,
+    `Hours: ${baseQuote.total_hours ?? '—'}`,
+    `Subtotal: ${formatCurrency(baseQuote.subtotal ?? null)}`,
+    `Discount: ${formatCurrency(baseQuote.discount_amount ?? null)}`,
+    `Total inc GST: ${formatCurrency(baseQuote.total_inc_gst ?? null)}`,
+    `Deposit: ${formatCurrency(baseQuote.deposit_amount ?? null)}`,
+    `Remaining: ${formatCurrency(baseQuote.remaining_balance ?? null)}`,
+    `Quote Notes: ${baseQuote.notes || '—'}`,
+  ].join('\n')
+
+  const html = `
+    <h2>Job Won</h2>
+    <h3>Lead</h3>
+    <ul>
+      <li><strong>Name:</strong> ${lead.name || 'Unknown'}</li>
+      <li><strong>Email:</strong> ${lead.email || '—'}</li>
+      <li><strong>Phone:</strong> ${lead.phone_number || '—'}</li>
+      <li><strong>Lead ID:</strong> ${lead.id}</li>
+    </ul>
+
+    <h3>Booking</h3>
+    <ul>
+      <li><strong>Title:</strong> ${series.title || '—'}</li>
+      <li><strong>Timezone:</strong> ${timezone}</li>
+      <li><strong>Start:</strong> ${firstStart ? formatDateTime(firstStart, timezone) : '—'}</li>
+      <li><strong>Duration:</strong> ${durationMinutes} mins</li>
+      <li><strong>Repeat:</strong> ${repeatType}</li>
+      <li><strong>Until:</strong> ${series.until_date || '—'}</li>
+      <li><strong>Occurrences:</strong> ${occurrencesTotal}</li>
+      <li><strong>Upcoming (first 5):</strong> ${occurrencePreview || '—'}</li>
+      <li><strong>Notes:</strong> ${bookingNotes || '—'}</li>
+    </ul>
+
+    <h3>Service Address</h3>
+    <p>${baseQuote.address || '—'}</p>
+
+    <h3>Quote</h3>
+    <ul>
+      <li><strong>Quote Number:</strong> ${baseQuote.quote_number || '—'}</li>
+      <li><strong>Service:</strong> ${baseQuote.service || '—'}</li>
+      <li><strong>Bedrooms:</strong> ${baseQuote.bedrooms ?? '—'}</li>
+      <li><strong>Bathrooms:</strong> ${baseQuote.bathrooms ?? '—'}</li>
+      <li><strong>Addons:</strong> ${normalizeList(baseQuote.addons)}</li>
+      <li><strong>Custom Addons:</strong> ${normalizeList(baseQuote.custom_addons)}</li>
+      <li><strong>Hours:</strong> ${baseQuote.total_hours ?? '—'}</li>
+      <li><strong>Subtotal:</strong> ${formatCurrency(baseQuote.subtotal ?? null)}</li>
+      <li><strong>Discount:</strong> ${formatCurrency(baseQuote.discount_amount ?? null)}</li>
+      <li><strong>Total inc GST:</strong> ${formatCurrency(baseQuote.total_inc_gst ?? null)}</li>
+      <li><strong>Deposit:</strong> ${formatCurrency(baseQuote.deposit_amount ?? null)}</li>
+      <li><strong>Remaining:</strong> ${formatCurrency(baseQuote.remaining_balance ?? null)}</li>
+      <li><strong>Quote Notes:</strong> ${baseQuote.notes || '—'}</li>
+    </ul>
+  `.trim()
+
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${resendApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: jobWonEmailFrom,
+        to: [jobWonNotifyEmail],
+        subject,
+        text,
+        html,
+      }),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('Failed to send job won email:', errorText)
+    }
+  } catch (err) {
+    console.error('Error sending job won email:', err)
+  }
+}
+
+async function resolveBaseQuote(
+  supabase: ReturnType<typeof createClient>,
+  quoteId: string,
+  leadId: string
+) {
+  const { data: quote, error: quoteError } = await supabase
+    .from('quotes')
+    .select(
+      `
+        id, lead_id, quote_number, address, address_lat, address_lng, description, service, bedrooms, bathrooms,
+        addons, custom_addons, hourly_rate, cleaner_rate, cleaner_rate_type, main_service_hours, add_on_hours,
+        total_hours, subtotal, discount_amount, discount_percentage, net_revenue, gst, total_inc_gst, cleaner_pay,
+        profit, margin, deposit_percentage, deposit_amount, remaining_balance, notes, customer_name, customer_phone,
+        customer_email, email_id, quote_scope, base_quote_id, quote_version
+      `
+    )
+    .eq('id', quoteId)
+    .eq('lead_id', leadId)
+    .single()
+
+  if (quoteError || !quote) {
+    return { error: 'Quote not found or does not belong to this lead', quote: null }
+  }
+
+  const quoteData = quote as QuoteTemplate
+  if (quoteData.quote_scope === 'occurrence_variant' && quoteData.base_quote_id) {
+    const { data: base, error: baseError } = await supabase
+      .from('quotes')
+      .select(
+        `
+          id, lead_id, quote_number, address, address_lat, address_lng, description, service, bedrooms, bathrooms,
+          addons, custom_addons, hourly_rate, cleaner_rate, cleaner_rate_type, main_service_hours, add_on_hours,
+          total_hours, subtotal, discount_amount, discount_percentage, net_revenue, gst, total_inc_gst, cleaner_pay,
+          profit, margin, deposit_percentage, deposit_amount, remaining_balance, notes, customer_name, customer_phone,
+          customer_email, email_id, quote_scope, base_quote_id, quote_version
+        `
+      )
+      .eq('id', quoteData.base_quote_id)
+      .eq('lead_id', leadId)
+      .single()
+
+    if (baseError || !base) {
+      return { error: 'Base quote not found for this lead', quote: null }
+    }
+
+    return { error: null, quote: base as QuoteTemplate }
+  }
+
+  return { error: null, quote: quoteData }
+}
+
+async function getNextQuoteVersion(
+  supabase: ReturnType<typeof createClient>,
+  baseQuoteId: string
+) {
+  const { data, error } = await supabase
+    .from('quotes')
+    .select('quote_version')
+    .eq('base_quote_id', baseQuoteId)
+    .order('quote_version', { ascending: false })
+    .limit(1)
+
+  if (error || !data || data.length === 0 || data[0]?.quote_version == null) {
+    return 2
+  }
+
+  return Number(data[0].quote_version) + 1
+}
+
+function buildVariantPayload(baseQuote: QuoteTemplate, version: number) {
+  const baseNumber = baseQuote.quote_number || null
+  const quoteNumber = baseNumber ? `${baseNumber}v${version}` : null
+
+  return {
+    lead_id: baseQuote.lead_id,
+    email_id: baseQuote.email_id ?? null,
+    quote_number: quoteNumber,
+    address: baseQuote.address ?? null,
+    address_lat: baseQuote.address_lat ?? null,
+    address_lng: baseQuote.address_lng ?? null,
+    description: baseQuote.description ?? null,
+    service: baseQuote.service ?? null,
+    bedrooms: baseQuote.bedrooms ?? null,
+    bathrooms: baseQuote.bathrooms ?? null,
+    addons: baseQuote.addons ?? [],
+    custom_addons: baseQuote.custom_addons ?? [],
+    hourly_rate: baseQuote.hourly_rate ?? null,
+    cleaner_rate: baseQuote.cleaner_rate ?? null,
+    cleaner_rate_type: baseQuote.cleaner_rate_type ?? null,
+    main_service_hours: baseQuote.main_service_hours ?? null,
+    add_on_hours: baseQuote.add_on_hours ?? null,
+    total_hours: baseQuote.total_hours ?? null,
+    subtotal: baseQuote.subtotal ?? null,
+    discount_amount: baseQuote.discount_amount ?? null,
+    discount_percentage: baseQuote.discount_percentage ?? null,
+    net_revenue: baseQuote.net_revenue ?? null,
+    gst: baseQuote.gst ?? null,
+    total_inc_gst: baseQuote.total_inc_gst ?? null,
+    cleaner_pay: baseQuote.cleaner_pay ?? null,
+    profit: baseQuote.profit ?? null,
+    margin: baseQuote.margin ?? null,
+    deposit_percentage: baseQuote.deposit_percentage ?? null,
+    deposit_amount: baseQuote.deposit_amount ?? null,
+    remaining_balance: baseQuote.remaining_balance ?? null,
+    notes: baseQuote.notes ?? null,
+    customer_name: baseQuote.customer_name ?? null,
+    customer_phone: baseQuote.customer_phone ?? null,
+    customer_email: baseQuote.customer_email ?? null,
+    share_token: null,
+    accepted_at: null,
+    accepted_payment_method: null,
+    base_quote_id: baseQuote.id,
+    quote_scope: 'occurrence_variant',
+    quote_version: version,
+  }
 }
 
 // Convert repeat type to RRULE string
@@ -183,7 +499,7 @@ Deno.serve(async (req) => {
     // 1. Verify the lead exists
     const { data: lead, error: leadError } = await supabase
       .from('extracted_leads')
-      .select('id, name, email')
+      .select('id, name, email, phone_number')
       .eq('id', payload.leadId)
       .single()
 
@@ -191,29 +507,23 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'Lead not found' }, 404)
     }
 
-    // 2. Verify the quote exists and belongs to the lead, and fetch address fields
-    const { data: quote, error: quoteError } = await supabase
-      .from('quotes')
-      .select('id, lead_id, address, address_lat, address_lng')
-      .eq('id', payload.quoteId)
-      .eq('lead_id', payload.leadId)
-      .single()
-
-    if (quoteError || !quote) {
-      return jsonResponse({ error: 'Quote not found or does not belong to this lead' }, 404)
+    // 2. Resolve the base quote for this series
+    const { error: quoteError, quote: baseQuote } = await resolveBaseQuote(supabase, payload.quoteId, payload.leadId)
+    if (quoteError || !baseQuote) {
+      return jsonResponse({ error: quoteError || 'Quote not found or does not belong to this lead' }, 404)
     }
 
-    // Extract address fields from quote
-    const quoteAddress = (quote as any).address || null
-    const quoteLat = typeof (quote as any).address_lat === 'number' ? (quote as any).address_lat : null
-    const quoteLng = typeof (quote as any).address_lng === 'number' ? (quote as any).address_lng : null
+    // Extract address fields from base quote
+    const quoteAddress = baseQuote.address || null
+    const quoteLat = typeof baseQuote.address_lat === 'number' ? baseQuote.address_lat : null
+    const quoteLng = typeof baseQuote.address_lng === 'number' ? baseQuote.address_lng : null
 
-    // 3. Create the booking series with synced address from quote
+    // 3. Create the booking series with synced address from base quote
     const { data: series, error: seriesError } = await supabase
       .from('booking_series')
       .insert({
         lead_id: payload.leadId,
-        quote_id: payload.quoteId,
+        quote_id: baseQuote.id,
         title,
         timezone,
         starts_at: startDate.toISOString(),
@@ -238,14 +548,34 @@ Deno.serve(async (req) => {
     // 3. Generate occurrence dates
     const occurrenceDates = generateOccurrences(startDate, rrule, untilDate, maxOccurrences)
 
-    // 4. Create occurrence records
-    const occurrenceRecords = occurrenceDates.map(date => {
+    // 4. Create quote variants for each occurrence (receipt + adjustable pricing)
+    const startingVersion = await getNextQuoteVersion(supabase, baseQuote.id)
+    const variantPayloads = occurrenceDates.map((_, index) =>
+      buildVariantPayload(baseQuote, startingVersion + index)
+    )
+
+    const { data: variants, error: variantsError } = await supabase
+      .from('quotes')
+      .insert(variantPayloads)
+      .select('id, quote_version')
+
+    if (variantsError || !variants || variants.length !== occurrenceDates.length) {
+      console.error('Error creating quote variants:', variantsError)
+      await supabase.from('booking_series').delete().eq('id', series.id)
+      return jsonResponse({ error: variantsError?.message || 'Failed to create quote variants' }, 500)
+    }
+
+    const variantIds = variants.map((v: any) => v.id)
+
+    // 5. Create occurrence records linked to their variant quotes
+    const occurrenceRecords = occurrenceDates.map((date, index) => {
       const endDate = new Date(date.getTime() + durationMinutes * 60 * 1000)
       return {
         series_id: series.id,
         start_at: date.toISOString(),
         end_at: endDate.toISOString(),
         status: 'scheduled',
+        quote_id: variantIds[index],
       }
     })
 
@@ -256,11 +586,12 @@ Deno.serve(async (req) => {
 
     if (occurrencesError) {
       console.error('Error creating occurrences:', occurrencesError)
-      // Roll back the series so we don't return a "success" without any occurrences
+      // Roll back the series and variants so we don't return a "success" without any occurrences
       const { error: rollbackError } = await supabase.from('booking_series').delete().eq('id', series.id)
       if (rollbackError) {
         console.error('Failed to rollback series after occurrence error:', rollbackError)
       }
+      await supabase.from('quotes').delete().in('id', variantIds)
       return jsonResponse(
         {
           error: 'Failed to create booking occurrences',
@@ -282,6 +613,17 @@ Deno.serve(async (req) => {
         // Don't fail - booking was created successfully
       }
     }
+
+    await sendJobWonEmail({
+      lead,
+      baseQuote,
+      series,
+      occurrenceDates,
+      durationMinutes,
+      repeatType,
+      timezone,
+      bookingNotes: notes,
+    })
 
     return jsonResponse({
       success: true,

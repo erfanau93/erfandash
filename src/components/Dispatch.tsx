@@ -544,7 +544,7 @@ export default function Dispatch() {
         supabase
           .from('booking_occurrences')
           .select(
-            `id, series_id, start_at, end_at, status, cleaner_id,
+            `id, series_id, quote_id, start_at, end_at, status, cleaner_id,
              series:booking_series(id, title, lead_id, quote_id, service_address, service_lat, service_lng, lead:extracted_leads(id, name))`
           )
           .gte('start_at', rangeStart.toISOString())
@@ -583,7 +583,9 @@ export default function Dispatch() {
       }
 
       // Quote pins: use the quote explicitly linked to each booking; fallback to latest quote only for legacy bookings without quote_id.
-      const quoteIds = Array.from(new Set(jobList.map((j) => j?.series?.quote_id).filter(Boolean))) as string[]
+      const quoteIds = Array.from(
+        new Set(jobList.map((j) => j?.quote_id || j?.series?.quote_id).filter(Boolean))
+      ) as string[]
       const quoteById: Record<
         string,
         { address: string | null; lat: number | null; lng: number | null; lead_id: string | null; total_inc_gst: number | null }
@@ -609,7 +611,7 @@ export default function Dispatch() {
       const fallbackLeadIds = Array.from(
         new Set(
           jobList
-            .map((j) => (!j?.series?.quote_id ? j?.series?.lead_id : null))
+            .map((j) => (!j?.quote_id && !j?.series?.quote_id ? j?.series?.lead_id : null))
             .filter(Boolean)
         )
       ) as string[]
@@ -639,7 +641,8 @@ export default function Dispatch() {
       for (const j of jobList) {
         const sid = j?.series?.id
         if (!sid) continue
-        const linked = j?.series?.quote_id ? quoteById[j.series.quote_id] : null
+        const linkedQuoteId = j?.quote_id || j?.series?.quote_id
+        const linked = linkedQuoteId ? quoteById[linkedQuoteId] : null
         const fallback = j?.series?.lead_id ? latestByLead[j.series.lead_id] : null
         const address = linked?.address ?? fallback?.address ?? j?.series?.service_address ?? null
         const lat = linked?.lat ?? fallback?.lat ?? j?.series?.service_lat ?? null

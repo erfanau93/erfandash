@@ -249,6 +249,47 @@ function LiveIndicator() {
   )
 }
 
+type EmailWebhookStatus = {
+  state: 'checking' | 'connected' | 'expired' | 'missing' | 'error'
+  expiresAt?: string
+  message?: string
+}
+
+function EmailWebhookIndicator({ status }: { status: EmailWebhookStatus }) {
+  const colorMap: Record<EmailWebhookStatus['state'], { dot: string; text: string }> = {
+    checking: { dot: 'bg-amber-400', text: 'text-amber-300' },
+    connected: { dot: 'bg-emerald-500', text: 'text-emerald-400' },
+    expired: { dot: 'bg-red-500', text: 'text-red-400' },
+    missing: { dot: 'bg-red-500', text: 'text-red-400' },
+    error: { dot: 'bg-amber-400', text: 'text-amber-300' },
+  }
+
+  const labelMap: Record<EmailWebhookStatus['state'], string> = {
+    checking: 'Email status checking',
+    connected: 'Emails connected',
+    expired: 'Emails not connected',
+    missing: 'Emails not connected',
+    error: 'Email status error',
+  }
+
+  const color = colorMap[status.state]
+  const label = labelMap[status.state]
+  const expiresLabel = status.expiresAt
+    ? `Expires ${new Date(status.expiresAt).toLocaleString()}`
+    : undefined
+  const helper = status.message || expiresLabel
+
+  return (
+    <div className="flex items-center gap-2" title={helper}>
+      <div className="relative w-3 h-3">
+        <div className={`absolute inset-0 rounded-full ${color.dot} ${status.state === 'connected' ? 'pulse-ring' : ''}`} />
+        <div className={`absolute inset-0 rounded-full ${color.dot}`} />
+      </div>
+      <span className={`${color.text} text-sm font-medium`}>{label}</span>
+    </div>
+  )
+}
+
 type PendingQuoteNav = {
   leadId: string | null
   editQuoteId: string | null
@@ -345,6 +386,9 @@ export default function Dashboard() {
   })
   const [manualLeadError, setManualLeadError] = useState<string | null>(null)
   const [savingManualLead, setSavingManualLead] = useState(false)
+  const [emailWebhookStatus, setEmailWebhookStatus] = useState<EmailWebhookStatus>({
+    state: 'checking',
+  })
 
   // Get start of today in UTC (to match database timestamps)
   const getStartOfToday = useCallback(() => {
@@ -605,6 +649,56 @@ export default function Dashboard() {
     }
   }, [getStartOfToday, selectedDate])
 
+  const fetchEmailWebhookStatus = useCallback(async () => {
+    setEmailWebhookStatus((prev) => ({ ...prev, state: 'checking', message: undefined }))
+    try {
+      const response = await fetch(`${supabaseUrl}/functions/v1/setup-outlook-webhook`)
+      if (!response.ok) {
+        throw new Error(`Status ${response.status}`)
+      }
+      const data = await response.json()
+      const subscriptions = Array.isArray(data?.value) ? data.value : []
+      const outlookSubscriptions = subscriptions.filter((sub: { notificationUrl?: string }) =>
+        (sub?.notificationUrl || '').includes('/outlook-webhook')
+      )
+
+      if (outlookSubscriptions.length === 0) {
+        setEmailWebhookStatus({ state: 'missing' })
+        return
+      }
+
+      const latest = outlookSubscriptions.reduce(
+        (acc: { expirationDateTime?: string }, current: { expirationDateTime?: string }) => {
+          if (!current.expirationDateTime) return acc
+          if (!acc.expirationDateTime) return current
+          return new Date(current.expirationDateTime) > new Date(acc.expirationDateTime) ? current : acc
+        },
+        {}
+      )
+
+      const expiresAt = latest.expirationDateTime
+      if (!expiresAt) {
+        setEmailWebhookStatus({ state: 'missing' })
+        return
+      }
+
+      const expiresTime = new Date(expiresAt).getTime()
+      const now = Date.now()
+      if (Number.isNaN(expiresTime) || expiresTime <= now) {
+        setEmailWebhookStatus({ state: 'expired', expiresAt })
+        return
+      }
+
+      setEmailWebhookStatus({ state: 'connected', expiresAt })
+    } catch (err) {
+      console.error('Error checking email webhook status:', err)
+      setEmailWebhookStatus({
+        state: 'error',
+        message: err instanceof Error ? err.message : 'Unable to check email status',
+      })
+    }
+  }, [])
+
   // Initial fetch and realtime subscription
   // Capture URL parameters once on mount for quote navigation
   useEffect(() => {
@@ -666,6 +760,8 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchMetrics()
+    fetchEmailWebhookStatus()
+    const emailStatusInterval = setInterval(fetchEmailWebhookStatus, 5 * 60 * 1000)
 
     // Subscribe to realtime changes on dialpad_calls
     const callsChannel = supabase
@@ -761,12 +857,13 @@ export default function Dashboard() {
 
     // Cleanup subscriptions on unmount
     return () => {
+      clearInterval(emailStatusInterval)
       supabase.removeChannel(callsChannel)
       supabase.removeChannel(smsChannel)
       supabase.removeChannel(emailsChannel)
       supabase.removeChannel(extractedLeadsChannel)
     }
-  }, [fetchMetrics])
+  }, [fetchMetrics, fetchEmailWebhookStatus])
 
   const handleRefresh = () => {
     setIsLoading(true)
@@ -798,6 +895,7 @@ export default function Dashboard() {
       setTimeout(() => {
         fetchMetrics()
       }, 1000)
+      fetchEmailWebhookStatus()
     } catch (err) {
       console.error('Error syncing emails:', err)
       setError(err instanceof Error ? err.message : 'Failed to sync emails')
@@ -1093,7 +1191,7 @@ export default function Dashboard() {
                     d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"
                   />
                 </svg>
-                Dialpad Dashboard
+                Sydney Premium Cleaning Dashboard
               </h1>
               <p className="text-[var(--color-text-muted)]">
                 Real-time communication metrics
@@ -1101,8 +1199,9 @@ export default function Dashboard() {
             </div>
 
             <div className="flex items-center gap-4 flex-wrap">
-              <DatePicker selectedDate={selectedDate} onDateChange={setSelectedDate} />
+              <DatePicker selectedDate={selectedDate ?? new Date()} onDateChange={setSelectedDate} />
               <LiveIndicator />
+              <EmailWebhookIndicator status={emailWebhookStatus} />
 
               <button
                 onClick={handleSyncEmails}

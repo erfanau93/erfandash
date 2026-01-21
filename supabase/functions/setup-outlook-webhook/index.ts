@@ -6,6 +6,65 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS, DELETE",
 };
 
+type GraphSubscription = {
+  id?: string;
+  notificationUrl?: string;
+  resource?: string;
+  expirationDateTime?: string;
+  clientState?: string;
+};
+
+async function listSubscriptions(token: string) {
+  const listResponse = await fetch("https://graph.microsoft.com/v1.0/subscriptions", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!listResponse.ok) {
+    const errorText = await listResponse.text();
+    return { ok: false, errorText };
+  }
+
+  const data = await listResponse.json();
+  return { ok: true, data };
+}
+
+async function deleteSubscription(token: string, subscriptionId: string) {
+  const response = await fetch(`https://graph.microsoft.com/v1.0/subscriptions/${subscriptionId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return response.ok;
+}
+
+async function renewSubscription(token: string, subscriptionId: string, expirationDateTime: string) {
+  const response = await fetch(`https://graph.microsoft.com/v1.0/subscriptions/${subscriptionId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      expirationDateTime,
+    }),
+  });
+
+  const responseText = await response.text();
+  let responseData;
+  try {
+    responseData = JSON.parse(responseText);
+  } catch {
+    responseData = { raw: responseText };
+  }
+
+  return { ok: response.ok, data: responseData };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -92,26 +151,17 @@ Deno.serve(async (req: Request) => {
     if (action === "list" || req.method === "GET") {
       // List existing subscriptions
       console.log(`[Setup Webhook] Listing subscriptions`);
-      const listResponse = await fetch(
-        "https://graph.microsoft.com/v1.0/subscriptions",
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      const listResult = await listSubscriptions(token);
 
-      if (!listResponse.ok) {
-        const errorText = await listResponse.text();
-        console.error(`[Setup Webhook] List error: ${errorText}`);
+      if (!listResult.ok) {
+        console.error(`[Setup Webhook] List error: ${listResult.errorText}`);
         return new Response(
-          JSON.stringify({ error: "Failed to list subscriptions", status: listResponse.status, details: errorText }),
+          JSON.stringify({ error: "Failed to list subscriptions", status: 500, details: listResult.errorText }),
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
-      const subscriptions = await listResponse.json();
+      const subscriptions = listResult.data;
       console.log(`[Setup Webhook] Found ${subscriptions.value?.length || 0} subscriptions`);
       return new Response(
         JSON.stringify(subscriptions),
@@ -120,19 +170,73 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "create") {
-      // Create a new subscription
+      // Create a new subscription (idempotent)
       // Webhook URL for the outlook-webhook function
       const webhookUrl = `${supabaseUrl}/functions/v1/outlook-webhook`;
-      
+      const resource = `users/${userEmail}/messages`;
+
       // Subscription expires in 4230 minutes (maximum for mail messages)
       const expirationDateTime = new Date();
       expirationDateTime.setMinutes(expirationDateTime.getMinutes() + 4230);
+      const expirationIso = expirationDateTime.toISOString();
+
+      const listResult = await listSubscriptions(token);
+      if (!listResult.ok) {
+        console.error(`[Setup Webhook] List error before create: ${listResult.errorText}`);
+        return new Response(
+          JSON.stringify({ error: "Failed to list subscriptions", status: 500, details: listResult.errorText }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const allSubscriptions = (listResult.data?.value || []) as GraphSubscription[];
+      const matching = allSubscriptions.filter((sub) =>
+        sub.notificationUrl === webhookUrl &&
+        sub.resource === resource &&
+        sub.clientState === "outlook-email-subscription"
+      );
+
+      if (matching.length > 0) {
+        const primary = matching.reduce((acc, current) => {
+          if (!acc.expirationDateTime) return current;
+          if (!current.expirationDateTime) return acc;
+          return new Date(current.expirationDateTime) > new Date(acc.expirationDateTime) ? current : acc;
+        }, matching[0]);
+
+        const deletedIds: string[] = [];
+        for (const sub of matching) {
+          if (sub.id && sub.id !== primary.id) {
+            const deleted = await deleteSubscription(token, sub.id);
+            if (deleted) deletedIds.push(sub.id);
+          }
+        }
+
+        if (primary.id) {
+          const renewResult = await renewSubscription(token, primary.id, expirationIso);
+          if (!renewResult.ok) {
+            console.error(`[Setup Webhook] Failed to renew subscription:`, renewResult.data);
+          }
+
+          return new Response(
+            JSON.stringify({
+              success: renewResult.ok,
+              action: "renewed",
+              subscription: renewResult.data,
+              expiresAt: expirationIso,
+              webhookUrl,
+              removedDuplicates: deletedIds.length,
+              removedIds: deletedIds,
+            }),
+            { status: renewResult.ok ? 200 : 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      }
 
       const subscriptionPayload = {
         changeType: "created",
         notificationUrl: webhookUrl,
-        resource: `users/${userEmail}/messages`,
-        expirationDateTime: expirationDateTime.toISOString(),
+        resource,
+        expirationDateTime: expirationIso,
         clientState: "outlook-email-subscription",
       };
 
@@ -181,8 +285,9 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({
           success: true,
+          action: "created",
           subscription: responseData,
-          expiresAt: expirationDateTime.toISOString(),
+          expiresAt: expirationIso,
           webhookUrl,
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -203,39 +308,19 @@ Deno.serve(async (req: Request) => {
       expirationDateTime.setMinutes(expirationDateTime.getMinutes() + 4230);
 
       console.log(`[Setup Webhook] Renewing subscription: ${subscriptionId}`);
-      const renewResponse = await fetch(
-        `https://graph.microsoft.com/v1.0/subscriptions/${subscriptionId}`,
-        {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            expirationDateTime: expirationDateTime.toISOString(),
-          }),
-        }
-      );
-
-      const responseText = await renewResponse.text();
-      let responseData;
-      try {
-        responseData = JSON.parse(responseText);
-      } catch {
-        responseData = { raw: responseText };
-      }
+      const renewResponse = await renewSubscription(token, subscriptionId, expirationDateTime.toISOString());
 
       if (!renewResponse.ok) {
-        console.error(`[Setup Webhook] Failed to renew subscription:`, responseText);
+        console.error(`[Setup Webhook] Failed to renew subscription:`, renewResponse.data);
       }
 
       return new Response(
         JSON.stringify({
           success: renewResponse.ok,
-          subscription: responseData,
+          subscription: renewResponse.data,
           newExpiration: expirationDateTime.toISOString(),
         }),
-        { status: renewResponse.ok ? 200 : renewResponse.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: renewResponse.ok ? 200 : 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 

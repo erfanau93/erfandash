@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { format, startOfDay, endOfDay, addDays, isFriday, startOfWeek, endOfWeek, subDays, isAfter, isBefore } from 'date-fns'
+import { format, startOfDay, addDays, isFriday, startOfWeek, endOfWeek, subDays, isAfter, isBefore } from 'date-fns'
 import { supabase } from '../lib/supabase'
 import { playSaveSound } from '../lib/sounds'
+import SmsLead from './SmsLead'
 
-type TodoType = 'lead_status' | 'unassigned_job' | 'past_due_unpaid' | 'cleaner_payout' | 'manual'
+type TodoType =
+  | 'lead_status'
+  | 'unassigned_job'
+  | 'mark_jobs_complete'
+  | 'past_due_unpaid'
+  | 'cleaner_payout'
+  | 'manual'
 
 interface Todo {
   id: string
@@ -26,6 +33,8 @@ interface Lead {
   name: string | null
   phone_number: string | null
   status: string | null
+  last_text_date?: string | number | null
+  last_text_body?: string | null
   created_at: string
 }
 
@@ -69,6 +78,12 @@ const TODO_TYPE_CONFIG: Record<TodoType, { label: string; color: string; bgColor
     bgColor: 'bg-orange-500/10 border-orange-500/30',
     icon: '📋'
   },
+  mark_jobs_complete: {
+    label: 'Mark Jobs Complete',
+    color: 'text-indigo-400',
+    bgColor: 'bg-indigo-500/10 border-indigo-500/30',
+    icon: '✅'
+  },
   past_due_unpaid: {
     label: 'Past Due Unpaid',
     color: 'text-rose-400',
@@ -89,16 +104,35 @@ const TODO_TYPE_CONFIG: Record<TodoType, { label: string; color: string; bgColor
   }
 }
 
+const dialpadUserId = '6452247499866112'
+const dialpadUrl = `https://dialpad.com/api/v2/users/${dialpadUserId}/initiate_call`
+const dialpadToken =
+  'NNRYnLXqJgkWXePcCG2SGCVzHfuB6kxAqQATPvnmn3x6k5RevHUCPdF8zF8jqXsssuyG67bEALxZH9TACsq4aARA46VL4yZ246Kf'
+
+const parseDate = (value?: string | number | null) => {
+  if (!value) return null
+  const d = typeof value === 'number' ? new Date(value) : new Date(value)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+const formatDateTime = (value?: string | number | null) => {
+  const parsed = parseDate(value)
+  return parsed ? format(parsed, 'EEE, MMM d • h:mm a') : null
+}
+
 export default function TodoPage() {
   const [manualTodos, setManualTodos] = useState<Todo[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [todosTableUnavailable, setTodosTableUnavailable] = useState(false)
+  const [callingLeadId, setCallingLeadId] = useState<string | null>(null)
+  const [lastCallsByLead, setLastCallsByLead] = useState<Record<string, string | null>>({})
 
   // Auto-generated todo data
   const [leadsWithoutStatus, setLeadsWithoutStatus] = useState<Lead[]>([])
   const [unassignedJobs, setUnassignedJobs] = useState<JobOccurrence[]>([])
+  const [overdueUnmarkedJobs, setOverdueUnmarkedJobs] = useState<JobOccurrence[]>([])
   const [pastDueUnpaidJobs, setPastDueUnpaidJobs] = useState<JobOccurrence[]>([])
   const [unpaidCleanerPayouts, setUnpaidCleanerPayouts] = useState<CleanerPayout[]>([])
 
@@ -136,6 +170,40 @@ export default function TodoPage() {
     }
   }, [])
 
+  const loadLastCalls = useCallback(async (leads: Lead[]) => {
+    try {
+      const phoneNumbers = Array.from(new Set(leads.map((l) => l.phone_number).filter(Boolean))) as string[]
+      if (!phoneNumbers.length) return
+
+      const callsMap: Record<string, string | null> = {}
+      const callPromises = phoneNumbers.map(async (phone) => {
+        const { data: calls } = await supabase
+          .from('dialpad_calls')
+          .select('created_at, external_number')
+          .or(`external_number.eq.${phone},external_number.eq.+${phone}`)
+          .order('created_at', { ascending: false })
+          .limit(1)
+
+        if (calls && calls.length > 0) {
+          callsMap[phone] = calls[0].created_at
+        }
+      })
+
+      await Promise.all(callPromises)
+
+      const lastCallsByLeadId: Record<string, string | null> = {}
+      leads.forEach((lead) => {
+        if (lead.phone_number && callsMap[lead.phone_number]) {
+          lastCallsByLeadId[lead.id] = callsMap[lead.phone_number]
+        }
+      })
+
+      setLastCallsByLead((prev) => ({ ...prev, ...lastCallsByLeadId }))
+    } catch (err) {
+      console.error('Failed to load last calls', err)
+    }
+  }, [])
+
   const fetchData = useCallback(async () => {
     setIsLoading(true)
     setError(null)
@@ -143,26 +211,26 @@ export default function TodoPage() {
     try {
       const fiveDaysFromNow = addDays(today, 5)
       const twoDaysAgo = subDays(today, 2)
+      const now = new Date()
 
-      // 1. Fetch today's leads without status
+      // 1. Fetch all leads without status (rollover)
       const { data: leads, error: leadsErr } = await supabase
         .from('extracted_leads')
-        .select('id, name, phone_number, status, created_at')
-        .gte('created_at', startOfDay(today).toISOString())
-        .lt('created_at', endOfDay(today).toISOString())
+        .select('id, name, phone_number, status, created_at, last_text_date, last_text_body')
+        .order('created_at', { ascending: false })
+        .limit(1000)
 
       if (leadsErr) throw leadsErr
 
-      const leadsNoStatus = (leads || []).filter(
-        (l: any) => !l.status || l.status === '' || l.status === 'Unanswered'
-      )
+      const leadsNoStatus = (leads || []).filter((l: any) => !l.status || l.status === '')
       setLeadsWithoutStatus(leadsNoStatus)
+      await loadLastCalls(leadsNoStatus)
 
       // 2. Fetch unassigned jobs for next 5 days
       const { data: unassignedData, error: unassignedErr } = await supabase
         .from('booking_occurrences')
         .select(`
-          id, series_id, start_at, end_at, status, cleaner_id,
+          id, series_id, quote_id, start_at, end_at, status, cleaner_id,
           series:booking_series(title, lead:extracted_leads(name), quote_id)
         `)
         .gte('start_at', today.toISOString())
@@ -174,12 +242,28 @@ export default function TodoPage() {
       if (unassignedErr) throw unassignedErr
       setUnassignedJobs((unassignedData || []) as any)
 
-      // 3. Fetch past due jobs (more than 2 days old) that are not paid
+      // 3. Fetch past jobs that are not marked completed
+      const { data: overdueData, error: overdueErr } = await supabase
+        .from('booking_occurrences')
+        .select(`
+          id, series_id, quote_id, start_at, end_at, status, cleaner_id,
+          series:booking_series(title, lead:extracted_leads(name), quote_id)
+        `)
+        .lt('start_at', now.toISOString())
+        .neq('status', 'completed')
+        .neq('status', 'cancelled')
+        .order('start_at', { ascending: false })
+        .limit(1000)
+
+      if (overdueErr) throw overdueErr
+      setOverdueUnmarkedJobs((overdueData || []) as any)
+
+      // 4. Fetch past due jobs (more than 2 days old) that are not paid
       // Payment is tracked on booking_occurrences via payment_status and payment_paid_at
       const { data: pastDueData, error: pastDueErr } = await supabase
         .from('booking_occurrences')
         .select(`
-          id, series_id, start_at, end_at, status, cleaner_id, payment_status, payment_paid_at,
+          id, series_id, quote_id, start_at, end_at, status, cleaner_id, payment_status, payment_paid_at,
           series:booking_series(title, lead:extracted_leads(name), quote_id)
         `)
         .lt('start_at', twoDaysAgo.toISOString())
@@ -196,7 +280,7 @@ export default function TodoPage() {
       if (occurrenceIds.length > 0) {
         // Get quote payment status for these occurrences
         const quoteIds = (pastDueData || [])
-          .map((o: any) => o.series?.quote_id)
+          .map((o: any) => o.quote_id || o.series?.quote_id)
           .filter(Boolean)
 
         let paidQuoteIds = new Set<string>()
@@ -223,7 +307,7 @@ export default function TodoPage() {
           // 2. payment_paid_at is not null, OR
           // 3. linked quote has accepted_payment_method = 'card_paid' or 'direct_transfer'
           const isPaidOnOccurrence = o.payment_status === 'paid' || o.payment_paid_at !== null
-          const quoteId = o.series?.quote_id
+          const quoteId = o.quote_id || o.series?.quote_id
           const isQuotePaid = quoteId && paidQuoteIds.has(quoteId)
           
           return !isPaidOnOccurrence && !isQuotePaid
@@ -234,7 +318,7 @@ export default function TodoPage() {
         setPastDueUnpaidJobs([])
       }
 
-      // 4. Fetch unpaid cleaner payouts - show on Friday if jobs from the week aren't paid
+      // 5. Fetch unpaid cleaner payouts - show on Friday if jobs from the week aren't paid
       // This fetches payouts for jobs that occurred during the current week
       const { data: payoutsData, error: payoutsErr } = await supabase
         .from('cleaner_payouts')
@@ -258,7 +342,7 @@ export default function TodoPage() {
 
       setUnpaidCleanerPayouts(weekPayouts as any)
 
-      // 5. Fetch manual todos
+      // 6. Fetch manual todos
       const { data: todosData, error: todosErr } = await supabase
         .from('todos')
         .select('*')
@@ -285,7 +369,7 @@ export default function TodoPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [today, weekStart, weekEnd])
+  }, [today, weekStart, weekEnd, loadLastCalls])
 
   useEffect(() => {
     fetchData()
@@ -413,6 +497,41 @@ export default function TodoPage() {
     }
   }
 
+  const handleCallLead = async (leadId: string, phoneNumber?: string | null) => {
+    if (!phoneNumber) {
+      setError('No phone number available for this lead.')
+      return
+    }
+
+    setError(null)
+    setCallingLeadId(leadId)
+    try {
+      const response = await fetch(dialpadUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          accept: 'application/json',
+          authorization: `Bearer ${dialpadToken}`,
+        },
+        body: JSON.stringify({ phone_number: phoneNumber }),
+      })
+
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok || result?.error) {
+        const details = result?.error || 'Failed to initiate call'
+        throw new Error(details)
+      }
+
+      const nowIso = new Date().toISOString()
+      setLastCallsByLead((prev) => ({ ...prev, [leadId]: nowIso }))
+    } catch (err) {
+      console.error('Error calling lead:', err)
+      setError(err instanceof Error ? err.message : 'Failed to initiate call')
+    } finally {
+      setCallingLeadId(null)
+    }
+  }
+
   const handleMarkPayoutPaid = async (payoutId: string) => {
     try {
       const { error: updateErr } = await supabase
@@ -435,6 +554,43 @@ export default function TodoPage() {
     }
   }
 
+  const handleMarkJobComplete = async (occurrenceId: string) => {
+    try {
+      const { error: updateErr } = await supabase
+        .from('booking_occurrences')
+        .update({ status: 'completed' })
+        .eq('id', occurrenceId)
+
+      if (updateErr) throw updateErr
+
+      // Best-effort: reflect completion in the Sales Funnel
+      try {
+        const { data: occ, error: occErr } = await supabase
+          .from('booking_occurrences')
+          .select('series:booking_series(lead_id)')
+          .eq('id', occurrenceId)
+          .single()
+
+        if (!occErr) {
+          const leadId = (occ as any)?.series?.lead_id
+          if (leadId) {
+            await supabase.from('extracted_leads').update({ status: 'Jobs Completed' }).eq('id', leadId)
+          }
+        }
+      } catch (leadErr) {
+        console.warn('Failed to update lead status for completed job', leadErr)
+      }
+
+      setOverdueUnmarkedJobs(prev => prev.filter(j => j.id !== occurrenceId))
+      setSuccessMessage('Job marked as completed!')
+      playSaveSound()
+      setTimeout(() => setSuccessMessage(null), 3000)
+    } catch (err: any) {
+      console.error('Failed to mark job as completed:', err)
+      setError(err?.message || 'Failed to mark job as completed')
+    }
+  }
+
   const getTotalPendingCount = () => {
     let count = 0
     
@@ -443,6 +599,9 @@ export default function TodoPage() {
     
     // Unassigned jobs (not dismissed)
     count += unassignedJobs.filter(j => !dismissedItems[`unassigned-${j.id}`]).length
+
+    // Overdue unmarked jobs (not dismissed)
+    count += overdueUnmarkedJobs.filter(j => !dismissedItems[`overdue-${j.id}`]).length
     
     // Past due unpaid (not dismissed)
     count += pastDueUnpaidJobs.filter(j => !dismissedItems[`pastdue-${j.id}`]).length
@@ -460,6 +619,7 @@ export default function TodoPage() {
 
   const allLeadsHaveStatus = leadsWithoutStatus.filter(l => !dismissedItems[`lead-${l.id}`]).length === 0
   const allJobsAssigned = unassignedJobs.filter(j => !dismissedItems[`unassigned-${j.id}`]).length === 0
+  const allOverdueMarked = overdueUnmarkedJobs.filter(j => !dismissedItems[`overdue-${j.id}`]).length === 0
   const allPastDuePaid = pastDueUnpaidJobs.filter(j => !dismissedItems[`pastdue-${j.id}`]).length === 0
   const allPayoutsPaid = unpaidCleanerPayouts.filter(p => !dismissedItems[`payout-${p.id}`]).length === 0
 
@@ -508,7 +668,7 @@ export default function TodoPage() {
         )}
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
           <div className={`glass-card rounded-xl p-4 border ${allLeadsHaveStatus ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-amber-500/30 bg-amber-500/5'}`}>
             <div className="flex items-center gap-2 mb-2">
               <span className="text-lg">👤</span>
@@ -532,6 +692,19 @@ export default function TodoPage() {
                 {unassignedJobs.filter(j => !dismissedItems[`unassigned-${j.id}`]).length}
               </p>
               {allJobsAssigned && <span className="text-emerald-400 text-lg">✓</span>}
+            </div>
+          </div>
+
+          <div className={`glass-card rounded-xl p-4 border ${allOverdueMarked ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-indigo-500/30 bg-indigo-500/5'}`}>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-lg">✅</span>
+              <p className="text-sm text-[var(--color-text-muted)]">Mark Complete</p>
+            </div>
+            <div className="flex items-center justify-between">
+              <p className={`text-2xl font-bold ${allOverdueMarked ? 'text-emerald-400' : 'text-indigo-400'}`}>
+                {overdueUnmarkedJobs.filter(j => !dismissedItems[`overdue-${j.id}`]).length}
+              </p>
+              {allOverdueMarked && <span className="text-emerald-400 text-lg">✓</span>}
             </div>
           </div>
 
@@ -589,7 +762,7 @@ export default function TodoPage() {
                   <div className="flex items-center gap-2">
                     <span className="text-xl">{TODO_TYPE_CONFIG.lead_status.icon}</span>
                     <h2 className={`font-semibold ${TODO_TYPE_CONFIG.lead_status.color}`}>
-                      Set Status for Today's Leads
+                      Set Status for Leads
                     </h2>
                   </div>
                   {allLeadsHaveStatus && (
@@ -599,7 +772,7 @@ export default function TodoPage() {
                   )}
                 </div>
                 <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                  All leads created today must have a status set
+                  Leads with no status set (rolls over until updated)
                 </p>
               </div>
               <div className="p-4 space-y-2 max-h-64 overflow-y-auto">
@@ -613,13 +786,48 @@ export default function TodoPage() {
                   leadsWithoutStatus.map(lead => {
                     const key = `lead-${lead.id}`
                     if (dismissedItems[key]) return null
+                    const lastCallText = formatDateTime(lastCallsByLead[lead.id])
+                    const lastTextDate = formatDateTime(lead.last_text_date ?? null)
                     return (
                       <div key={lead.id} className="p-3 rounded-xl bg-black/20 border border-white/10 flex items-center justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <p className="text-white font-medium truncate">{lead.name || 'No name'}</p>
                           <p className="text-xs text-[var(--color-text-muted)]">{lead.phone_number || 'No phone'}</p>
+                          {(lastCallText || lastTextDate || lead.last_text_body) && (
+                            <div className="mt-2 space-y-0.5">
+                              <p className="text-xs text-[var(--color-text-muted)]">
+                                Last Call: {lastCallText || 'No recent calls'}
+                              </p>
+                              <p className="text-xs text-[var(--color-text-muted)]">
+                                Last Text:{' '}
+                                {lead.last_text_body ? `“${lead.last_text_body}”` : 'No recent texts'}
+                                {lastTextDate ? ` • ${lastTextDate}` : ''}
+                              </p>
+                            </div>
+                          )}
                         </div>
                         <div className="flex items-center gap-2">
+                          <SmsLead
+                            leadId={lead.id}
+                            leadName={lead.name}
+                            phoneNumber={lead.phone_number}
+                            dialpadToken={dialpadToken}
+                            dialpadUserId={dialpadUserId}
+                            onSent={({ sentAt, message }) => {
+                              setLeadsWithoutStatus((prev) =>
+                                prev.map((l) =>
+                                  l.id === lead.id ? { ...l, last_text_date: sentAt, last_text_body: message } : l
+                                )
+                              )
+                            }}
+                          />
+                          <button
+                            onClick={() => handleCallLead(lead.id, lead.phone_number)}
+                            disabled={callingLeadId === lead.id}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-200 text-xs border border-emerald-500/30 disabled:opacity-60"
+                          >
+                            {callingLeadId === lead.id ? 'Calling…' : 'Call Lead'}
+                          </button>
                           <select
                             onChange={(e) => handleMarkLeadStatus(lead.id, e.target.value)}
                             className="px-2 py-1 rounded-lg bg-white/10 border border-white/10 text-white text-xs"
@@ -709,7 +917,76 @@ export default function TodoPage() {
               </div>
             </div>
 
-            {/* 3. Past Due Unpaid Jobs */}
+            {/* 3. Mark Jobs as Complete */}
+            <div className={`rounded-2xl border ${TODO_TYPE_CONFIG.mark_jobs_complete.bgColor} overflow-hidden`}>
+              <div className="p-4 border-b border-white/10">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">{TODO_TYPE_CONFIG.mark_jobs_complete.icon}</span>
+                    <h2 className={`font-semibold ${TODO_TYPE_CONFIG.mark_jobs_complete.color}`}>
+                      Mark Jobs as Complete
+                    </h2>
+                  </div>
+                  {allOverdueMarked && (
+                    <span className="px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs">
+                      ✓ Complete
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                  Past jobs that have not been marked completed, skipped, cancelled, or scheduled
+                </p>
+              </div>
+              <div className="p-4 space-y-2 max-h-64 overflow-y-auto">
+                {isLoading ? (
+                  <div className="text-sm text-[var(--color-text-muted)]">Loading...</div>
+                ) : overdueUnmarkedJobs.length === 0 ? (
+                  <div className="text-sm text-emerald-300 flex items-center gap-2">
+                    <span>✓</span> No overdue unmarked jobs!
+                  </div>
+                ) : (
+                  overdueUnmarkedJobs.map(job => {
+                    const key = `overdue-${job.id}`
+                    if (dismissedItems[key]) return null
+                    return (
+                      <div key={job.id} className="p-3 rounded-xl bg-black/20 border border-white/10 flex items-center justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-white font-medium truncate">
+                            {job.series?.lead?.name || 'Customer'} • {job.series?.title || 'Job'}
+                          </p>
+                          <p className="text-xs text-[var(--color-text-muted)]">
+                            {format(new Date(job.start_at), 'EEE, MMM d • h:mm a')}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleMarkJobComplete(job.id)}
+                            className="px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-200 text-xs border border-indigo-500/30"
+                          >
+                            Mark Complete ✓
+                          </button>
+                          <button
+                            onClick={() => window.dispatchEvent(new CustomEvent('open-job-modal', { detail: { occurrenceId: job.id } }))}
+                            className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 text-xs border border-white/10"
+                          >
+                            View
+                          </button>
+                          <button
+                            onClick={() => handleDismissItem(key)}
+                            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/50 hover:text-white/80 text-xs"
+                            title="Dismiss"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* 4. Past Due Unpaid Jobs */}
             <div className={`rounded-2xl border ${TODO_TYPE_CONFIG.past_due_unpaid.bgColor} overflow-hidden`}>
               <div className="p-4 border-b border-white/10">
                 <div className="flex items-center justify-between">
@@ -775,7 +1052,7 @@ export default function TodoPage() {
 
           {/* Right Column */}
           <div className="space-y-4">
-            {/* 4. Cleaner Payouts Section */}
+            {/* 5. Cleaner Payouts Section */}
             <div className={`rounded-2xl border ${TODO_TYPE_CONFIG.cleaner_payout.bgColor} overflow-hidden`}>
               <div className="p-4 border-b border-white/10">
                 <div className="flex items-center justify-between">
@@ -856,7 +1133,7 @@ export default function TodoPage() {
               )}
             </div>
 
-            {/* 5. Manual Todo Section */}
+            {/* 6. Manual Todo Section */}
             <div className={`rounded-2xl border ${TODO_TYPE_CONFIG.manual.bgColor} overflow-hidden`}>
               <div className="p-4 border-b border-white/10">
                 <div className="flex items-center justify-between">
@@ -938,9 +1215,9 @@ export default function TodoPage() {
                   <div className="text-sm text-[var(--color-text-muted)]">Loading...</div>
                 ) : todosTableUnavailable ? (
                   <div className="text-sm text-amber-300 text-center py-4 space-y-2">
-                    <p>⏳ Manual todos are syncing...</p>
+                    <p>⏳ Manual todos are syncing with the database...</p>
                     <p className="text-xs text-[var(--color-text-muted)]">
-                      The database is updating. This usually takes 1-2 minutes. Click Refresh to check again.
+                      This usually takes 1-2 minutes after new tables are created. Click Refresh to check again.
                     </p>
                   </div>
                 ) : filteredManualTodos.length === 0 ? (

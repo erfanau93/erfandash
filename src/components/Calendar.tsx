@@ -818,14 +818,14 @@ export default function Calendar() {
           .select('id')
           .eq('occurrence_id', occurrenceId)
           .limit(1)
-        if (existing && existing.length > 0) return
+        if (existing && existing.length > 0) return true
 
         const ev = events.find((e) => e.id === occurrenceId) || selectedEvent || null
         const occCleanerId = ev?.extendedProps?.occurrence?.cleaner_id || null
-        if (!occCleanerId) return
+        if (!occCleanerId) return true
 
         const cleaner = cleaners.find((c) => c.id === occCleanerId)
-        if (!cleaner) return
+        if (!cleaner) return true
 
         setReviewError(null)
         setReviewRating(5)

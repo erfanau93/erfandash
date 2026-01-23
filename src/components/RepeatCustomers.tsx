@@ -105,10 +105,18 @@ function countOccurrencesInMonth(startsAt: string, rrule: string | null, monthSt
   if (!rrule) return 0
   const startDate = new Date(startsAt)
   if (Number.isNaN(startDate.getTime())) return 0
-  if (startDate > monthEnd) return 0
 
-  const occurrences = generateOccurrencesUntil(startDate, rrule, monthEnd, 200)
-  return occurrences.filter((date) => date >= monthStart && date <= monthEnd).length
+  let effectiveMonthStart = monthStart
+  let effectiveMonthEnd = monthEnd
+
+  // If the series starts in a future month, use that month for "monthly" revenue.
+  if (startDate > monthEnd) {
+    effectiveMonthStart = new Date(startDate.getFullYear(), startDate.getMonth(), 1, 0, 0, 0, 0)
+    effectiveMonthEnd = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0, 23, 59, 59, 999)
+  }
+
+  const occurrences = generateOccurrencesUntil(startDate, rrule, effectiveMonthEnd, 200)
+  return occurrences.filter((date) => date >= effectiveMonthStart && date <= effectiveMonthEnd).length
 }
 
 export default function RepeatCustomers() {
@@ -407,9 +415,11 @@ export default function RepeatCustomers() {
               const contact = lead.email || lead.phone_number || ''
 
               return (
-                <div
+                <a
                   key={lead.id}
-                  className="rounded-xl bg-gradient-to-r from-slate-800/50 to-slate-900/50 border border-white/10 p-5 hover:border-violet-400/30 transition group"
+                  href={`/?lead=${lead.id}`}
+                  className="block rounded-xl bg-gradient-to-r from-slate-800/50 to-slate-900/50 border border-white/10 p-5 hover:border-violet-400/30 transition group"
+                  aria-label={`Open ${displayName}`}
                 >
                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                     {/* Customer Info */}
@@ -480,7 +490,7 @@ export default function RepeatCustomers() {
                       </p>
                     )}
                   </div>
-                </div>
+                </a>
               )
             })}
           </div>

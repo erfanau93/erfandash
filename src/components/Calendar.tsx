@@ -576,15 +576,7 @@ export default function Calendar() {
     if (typeof window === 'undefined') return new Date()
     const params = new URLSearchParams(window.location.search)
     const fromUrl = params.get('calDate')
-    const fromStorage = (() => {
-      try {
-        return localStorage.getItem('calendar-date')
-      } catch {
-        return null
-      }
-    })()
-    const candidate = fromUrl || fromStorage
-    const parsed = candidate ? new Date(candidate) : null
+    const parsed = fromUrl ? new Date(fromUrl) : null
     return parsed && !Number.isNaN(parsed.getTime()) ? parsed : new Date()
   })
   const [dateRange, setDateRange] = useState({ start: new Date(), end: new Date() })
@@ -733,11 +725,6 @@ export default function Calendar() {
           } catch {
             // ignore storage failures
           }
-        }
-        try {
-          localStorage.setItem('calendar-date', dateInfo.start.toISOString())
-        } catch {
-          // ignore storage failures
         }
         const newUrl = `${window.location.pathname}?${params.toString()}`
         window.history.replaceState({}, '', newUrl)

@@ -20,6 +20,14 @@ const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 const resendApiKey = Deno.env.get('RESEND_API_KEY') || ''
 const jobWonNotifyEmail = Deno.env.get('JOB_WON_NOTIFY_EMAIL') || ''
 const jobWonEmailFrom = Deno.env.get('JOB_WON_EMAIL_FROM') || ''
+const jobWonAdminUrl =
+  Deno.env.get('JOB_WON_ADMIN_URL') || Deno.env.get('ADMIN_DASHBOARD_URL') || ''
+const bookingCustomerEmailFrom =
+  Deno.env.get('BOOKING_CONFIRMATION_EMAIL_FROM') || jobWonEmailFrom
+const bookingCustomerReplyTo = Deno.env.get('BOOKING_CONFIRMATION_REPLY_TO') || ''
+const businessName = Deno.env.get('BUSINESS_NAME') || 'Sydney Premium Cleaning'
+const businessEmail = Deno.env.get('BUSINESS_EMAIL') || 'sales@sydneypremiumcleaning.com.au'
+const businessPhone = Deno.env.get('BUSINESS_PHONE') || '0426413984'
 
 type RepeatType = 'none' | 'weekly' | 'fortnightly' | '3-weekly' | 'monthly' | '2-monthly'
 
@@ -35,6 +43,8 @@ interface CreateBookingPayload {
   notes?: string
   timezone?: string
   updateLeadStatus?: boolean
+  testOnly?: boolean
+  testEmailTo?: string
 }
 
 type QuoteTemplate = {
@@ -91,6 +101,20 @@ function formatDateTime(date: Date, timezone: string) {
   }).format(date)
 }
 
+function formatDateOnly(date: Date, timezone: string) {
+  return new Intl.DateTimeFormat('en-AU', {
+    timeZone: timezone,
+    dateStyle: 'full',
+  }).format(date)
+}
+
+function formatTimeOnly(date: Date, timezone: string) {
+  return new Intl.DateTimeFormat('en-AU', {
+    timeZone: timezone,
+    timeStyle: 'short',
+  }).format(date)
+}
+
 function normalizeList(value: unknown): string {
   if (!Array.isArray(value) || value.length === 0) return 'None'
   return value
@@ -111,10 +135,12 @@ async function sendJobWonEmail(params: {
   repeatType: RepeatType
   timezone: string
   bookingNotes: string | null
-}) {
-  if (!resendApiKey || !jobWonNotifyEmail || !jobWonEmailFrom) {
+  toOverride?: string | null
+}): Promise<{ sent: boolean; error?: string }> {
+  const targetEmail = params.toOverride || jobWonNotifyEmail
+  if (!resendApiKey || !targetEmail || !jobWonEmailFrom) {
     console.log('Job won email skipped: missing RESEND_API_KEY / JOB_WON_NOTIFY_EMAIL / JOB_WON_EMAIL_FROM')
-    return
+    return { sent: false, error: 'missing_email_configuration' }
   }
 
   const { lead, baseQuote, series, occurrenceDates, durationMinutes, repeatType, timezone, bookingNotes } = params
@@ -125,10 +151,10 @@ async function sendJobWonEmail(params: {
     .join(', ')
   const occurrencesTotal = occurrenceDates.length
 
-  const subject = `Job Won: ${lead.name || 'Lead'} — ${series.title || 'Booking'}`
+  const subject = `Sydney Premium Cleaning — Job Won: ${lead.name || 'Lead'}`
 
   const text = [
-    `Job Won`,
+    `Sydney Premium Cleaning — Job Won`,
     ``,
     `Lead: ${lead.name || 'Unknown'}`,
     `Email: ${lead.email || '—'}`,
@@ -162,50 +188,81 @@ async function sendJobWonEmail(params: {
     `Deposit: ${formatCurrency(baseQuote.deposit_amount ?? null)}`,
     `Remaining: ${formatCurrency(baseQuote.remaining_balance ?? null)}`,
     `Quote Notes: ${baseQuote.notes || '—'}`,
+    ...(jobWonAdminUrl ? [`Admin: ${jobWonAdminUrl}`] : []),
   ].join('\n')
 
   const html = `
-    <h2>Job Won</h2>
-    <h3>Lead</h3>
-    <ul>
-      <li><strong>Name:</strong> ${lead.name || 'Unknown'}</li>
-      <li><strong>Email:</strong> ${lead.email || '—'}</li>
-      <li><strong>Phone:</strong> ${lead.phone_number || '—'}</li>
-      <li><strong>Lead ID:</strong> ${lead.id}</li>
-    </ul>
+    <div style="background:#f5f7fb;padding:32px 12px;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+      <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+        <div style="background:#0ea5e9;color:#ffffff;padding:20px 24px;">
+          <h1 style="margin:0;font-size:20px;">Job Won</h1>
+          <p style="margin:6px 0 0;font-size:14px;">Sydney Premium Cleaning</p>
+        </div>
 
-    <h3>Booking</h3>
-    <ul>
-      <li><strong>Title:</strong> ${series.title || '—'}</li>
-      <li><strong>Timezone:</strong> ${timezone}</li>
-      <li><strong>Start:</strong> ${firstStart ? formatDateTime(firstStart, timezone) : '—'}</li>
-      <li><strong>Duration:</strong> ${durationMinutes} mins</li>
-      <li><strong>Repeat:</strong> ${repeatType}</li>
-      <li><strong>Until:</strong> ${series.until_date || '—'}</li>
-      <li><strong>Occurrences:</strong> ${occurrencesTotal}</li>
-      <li><strong>Upcoming (first 5):</strong> ${occurrencePreview || '—'}</li>
-      <li><strong>Notes:</strong> ${bookingNotes || '—'}</li>
-    </ul>
+        <div style="padding:20px 24px;">
+          <h2 style="margin:0 0 8px;font-size:16px;color:#0f172a;">Lead</h2>
+          <table style="width:100%;border-collapse:collapse;font-size:14px;">
+            <tr><td style="padding:6px 0;color:#64748b;">Name</td><td style="padding:6px 0;">${lead.name || 'Unknown'}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Email</td><td style="padding:6px 0;">${lead.email || '—'}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Phone</td><td style="padding:6px 0;">${lead.phone_number || '—'}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Lead ID</td><td style="padding:6px 0;">${lead.id}</td></tr>
+          </table>
 
-    <h3>Service Address</h3>
-    <p>${baseQuote.address || '—'}</p>
+          <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0;"/>
 
-    <h3>Quote</h3>
-    <ul>
-      <li><strong>Quote Number:</strong> ${baseQuote.quote_number || '—'}</li>
-      <li><strong>Service:</strong> ${baseQuote.service || '—'}</li>
-      <li><strong>Bedrooms:</strong> ${baseQuote.bedrooms ?? '—'}</li>
-      <li><strong>Bathrooms:</strong> ${baseQuote.bathrooms ?? '—'}</li>
-      <li><strong>Addons:</strong> ${normalizeList(baseQuote.addons)}</li>
-      <li><strong>Custom Addons:</strong> ${normalizeList(baseQuote.custom_addons)}</li>
-      <li><strong>Hours:</strong> ${baseQuote.total_hours ?? '—'}</li>
-      <li><strong>Subtotal:</strong> ${formatCurrency(baseQuote.subtotal ?? null)}</li>
-      <li><strong>Discount:</strong> ${formatCurrency(baseQuote.discount_amount ?? null)}</li>
-      <li><strong>Total inc GST:</strong> ${formatCurrency(baseQuote.total_inc_gst ?? null)}</li>
-      <li><strong>Deposit:</strong> ${formatCurrency(baseQuote.deposit_amount ?? null)}</li>
-      <li><strong>Remaining:</strong> ${formatCurrency(baseQuote.remaining_balance ?? null)}</li>
-      <li><strong>Quote Notes:</strong> ${baseQuote.notes || '—'}</li>
-    </ul>
+          <h2 style="margin:0 0 8px;font-size:16px;color:#0f172a;">Booking</h2>
+          <table style="width:100%;border-collapse:collapse;font-size:14px;">
+            <tr><td style="padding:6px 0;color:#64748b;">Title</td><td style="padding:6px 0;">${series.title || '—'}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Timezone</td><td style="padding:6px 0;">${timezone}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Start</td><td style="padding:6px 0;">${firstStart ? formatDateTime(firstStart, timezone) : '—'}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Duration</td><td style="padding:6px 0;">${durationMinutes} mins</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Repeat</td><td style="padding:6px 0;">${repeatType}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Until</td><td style="padding:6px 0;">${series.until_date || '—'}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Occurrences</td><td style="padding:6px 0;">${occurrencesTotal}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Upcoming (first 5)</td><td style="padding:6px 0;">${occurrencePreview || '—'}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Notes</td><td style="padding:6px 0;">${bookingNotes || '—'}</td></tr>
+          </table>
+
+          <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0;"/>
+
+          <h2 style="margin:0 0 8px;font-size:16px;color:#0f172a;">Service Address</h2>
+          <p style="margin:0;font-size:14px;">${baseQuote.address || '—'}</p>
+
+          <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0;"/>
+
+          <h2 style="margin:0 0 8px;font-size:16px;color:#0f172a;">Quote</h2>
+          <table style="width:100%;border-collapse:collapse;font-size:14px;">
+            <tr><td style="padding:6px 0;color:#64748b;">Quote Number</td><td style="padding:6px 0;">${baseQuote.quote_number || '—'}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Service</td><td style="padding:6px 0;">${baseQuote.service || '—'}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Bedrooms</td><td style="padding:6px 0;">${baseQuote.bedrooms ?? '—'}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Bathrooms</td><td style="padding:6px 0;">${baseQuote.bathrooms ?? '—'}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Addons</td><td style="padding:6px 0;">${normalizeList(baseQuote.addons)}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Custom Addons</td><td style="padding:6px 0;">${normalizeList(baseQuote.custom_addons)}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Hours</td><td style="padding:6px 0;">${baseQuote.total_hours ?? '—'}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Subtotal</td><td style="padding:6px 0;">${formatCurrency(baseQuote.subtotal ?? null)}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Discount</td><td style="padding:6px 0;">${formatCurrency(baseQuote.discount_amount ?? null)}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Total inc GST</td><td style="padding:6px 0;">${formatCurrency(baseQuote.total_inc_gst ?? null)}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Deposit</td><td style="padding:6px 0;">${formatCurrency(baseQuote.deposit_amount ?? null)}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Remaining</td><td style="padding:6px 0;">${formatCurrency(baseQuote.remaining_balance ?? null)}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b;">Quote Notes</td><td style="padding:6px 0;">${baseQuote.notes || '—'}</td></tr>
+          </table>
+
+          ${
+            jobWonAdminUrl
+              ? `<div style="margin-top:20px;text-align:center;">
+                  <a href="${jobWonAdminUrl}" style="background:#0ea5e9;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:8px;display:inline-block;font-weight:600;">
+                    Open Dashboard
+                  </a>
+                </div>`
+              : ''
+          }
+        </div>
+
+        <div style="background:#f8fafc;padding:16px 24px;font-size:12px;color:#64748b;">
+          Sydney Premium Cleaning · sales@sydneypremiumcleaning.com.au
+        </div>
+      </div>
+    </div>
   `.trim()
 
   try {
@@ -217,7 +274,7 @@ async function sendJobWonEmail(params: {
       },
       body: JSON.stringify({
         from: jobWonEmailFrom,
-        to: [jobWonNotifyEmail],
+        to: [targetEmail],
         subject,
         text,
         html,
@@ -227,9 +284,132 @@ async function sendJobWonEmail(params: {
     if (!response.ok) {
       const errorText = await response.text()
       console.error('Failed to send job won email:', errorText)
+      return { sent: false, error: errorText }
     }
+    return { sent: true }
   } catch (err) {
     console.error('Error sending job won email:', err)
+    return { sent: false, error: err instanceof Error ? err.message : 'unknown_error' }
+  }
+}
+
+async function sendCustomerBookingConfirmationEmail(params: {
+  lead: { id: string; name: string | null; email: string | null; phone_number?: string | null }
+  baseQuote: QuoteTemplate
+  series: any
+  occurrenceDates: Date[]
+  durationMinutes: number
+  timezone: string
+  bookingNotes: string | null
+}) {
+  if (!resendApiKey || !bookingCustomerEmailFrom) {
+    console.log('Customer confirmation skipped: missing RESEND_API_KEY / BOOKING_CONFIRMATION_EMAIL_FROM')
+    return { sent: false, error: 'missing_email_configuration' }
+  }
+
+  const { lead, baseQuote, occurrenceDates, timezone } = params
+  const customerEmail = baseQuote.customer_email || lead.email || ''
+  if (!customerEmail) {
+    console.log('Customer confirmation skipped: missing customer email')
+    return { sent: false, error: 'missing_customer_email' }
+  }
+
+  const customerName = baseQuote.customer_name || lead.name || 'Client'
+  const cleanType = baseQuote.service || 'cleaning service'
+  const firstStart = occurrenceDates[0]
+  const appointmentDate = firstStart ? formatDateOnly(firstStart, timezone) : '—'
+  const appointmentTime = firstStart ? formatTimeOnly(firstStart, timezone) : '—'
+
+  const subject = `${customerName} | ${businessName} appointment is confirmed`
+
+  const text = [
+    `Hi ${customerName},`,
+    ``,
+    `Thank you for booking with ${businessName}.`,
+    ``,
+    `Your ${cleanType} is confirmed for ${appointmentTime} on ${appointmentDate}.`,
+    ``,
+    `If you need to make changes to this appointment, please call ${businessPhone} or reply to this email.`,
+    ``,
+    `Thank you for your business,`,
+    ``,
+    `${businessName}`,
+    businessEmail,
+    businessPhone,
+  ].join('\n')
+
+  const html = `
+    <div style="background:#f5f7fb;padding:32px 12px;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+      <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+        <div style="background:#0ea5e9;color:#ffffff;padding:20px 24px;">
+          <h1 style="margin:0;font-size:20px;">Appointment Confirmed</h1>
+          <p style="margin:6px 0 0;font-size:14px;">${businessName}</p>
+        </div>
+
+        <div style="padding:20px 24px;font-size:14px;line-height:1.6;color:#0f172a;">
+          <p style="margin:0 0 12px;">Hi ${customerName},</p>
+          <p style="margin:0 0 12px;">Thank you for booking with ${businessName}.</p>
+
+          <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;margin:16px 0;">
+            <table style="width:100%;border-collapse:collapse;font-size:14px;">
+              <tr>
+                <td style="padding:6px 0;color:#64748b;width:140px;">Service</td>
+                <td style="padding:6px 0;">${cleanType}</td>
+              </tr>
+              <tr>
+                <td style="padding:6px 0;color:#64748b;">Date</td>
+                <td style="padding:6px 0;">${appointmentDate}</td>
+              </tr>
+              <tr>
+                <td style="padding:6px 0;color:#64748b;">Time</td>
+                <td style="padding:6px 0;">${appointmentTime}</td>
+              </tr>
+            </table>
+          </div>
+
+          <p style="margin:0 0 12px;">
+            If you need to make changes to this appointment, please call ${businessPhone} or reply to this email.
+          </p>
+
+          <p style="margin:0;">Thank you for your business,</p>
+          <p style="margin:4px 0 0;font-weight:600;">${businessName}</p>
+          <p style="margin:4px 0 0;color:#64748b;">${businessEmail}</p>
+          <p style="margin:2px 0 0;color:#64748b;">${businessPhone}</p>
+        </div>
+
+        <div style="background:#f8fafc;padding:12px 24px;font-size:12px;color:#94a3b8;">
+          This is an automated confirmation. If you have any questions, reply to this email.
+        </div>
+      </div>
+    </div>
+  `.trim()
+
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${resendApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: bookingCustomerEmailFrom,
+        to: [customerEmail],
+        subject,
+        text,
+        html,
+        ...(bookingCustomerReplyTo ? { reply_to: bookingCustomerReplyTo } : {}),
+      }),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('Failed to send customer confirmation email:', errorText)
+      return { sent: false, error: errorText }
+    }
+    return { sent: true }
+  } catch (err) {
+    console.error('Error sending customer confirmation email:', err)
+    return { sent: false, error: err instanceof Error ? err.message : 'unknown_error' }
   }
 }
 
@@ -513,6 +693,29 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: quoteError || 'Quote not found or does not belong to this lead' }, 404)
     }
 
+    if (payload.testOnly === true) {
+      const occurrenceDates = generateOccurrences(startDate, rrule, untilDate, maxOccurrences)
+      const seriesPreview = {
+        title,
+        timezone,
+        until_date: untilDate ? untilDate.toISOString().split('T')[0] : null,
+      }
+
+      const sendResult = await sendJobWonEmail({
+        lead,
+        baseQuote,
+        series: seriesPreview,
+        occurrenceDates,
+        durationMinutes,
+        repeatType,
+        timezone,
+        bookingNotes: notes,
+        toOverride: payload.testEmailTo || null,
+      })
+
+      return jsonResponse({ success: true, test_only: true, send_result: sendResult })
+    }
+
     // Extract address fields from base quote
     const quoteAddress = baseQuote.address || null
     const quoteLat = typeof baseQuote.address_lat === 'number' ? baseQuote.address_lat : null
@@ -621,6 +824,16 @@ Deno.serve(async (req) => {
       occurrenceDates,
       durationMinutes,
       repeatType,
+      timezone,
+      bookingNotes: notes,
+    })
+
+    await sendCustomerBookingConfirmationEmail({
+      lead,
+      baseQuote,
+      series,
+      occurrenceDates,
+      durationMinutes,
       timezone,
       bookingNotes: notes,
     })

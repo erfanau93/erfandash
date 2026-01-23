@@ -17,10 +17,12 @@ type Cleaner = {
 type BookingOccurrence = {
   id: string
   series_id: string
+  quote_id?: string | null
   start_at: string
   end_at: string
   status: string
   cleaner_id: string | null
+  notes?: string | null
   series?: {
     id: string
     title: string
@@ -29,6 +31,7 @@ type BookingOccurrence = {
     service_address: string | null
     service_lat: number | null
     service_lng: number | null
+    notes?: string | null
     lead?: { id: string; name: string | null }
   }
 }
@@ -111,6 +114,32 @@ function formatDistance(km: number): string {
 function formatCurrency(value: number | null | undefined) {
   if (value === null || value === undefined || Number.isNaN(value)) return null
   return `$${Number(value).toFixed(2)}`
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('en-AU', {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function normalizeAddonList(addons: unknown, customAddons: unknown) {
+  const base = Array.isArray(addons)
+    ? addons.filter((a) => typeof a === 'string' && a.trim())
+    : []
+  const custom = Array.isArray(customAddons)
+    ? customAddons
+        .map((a) => (a && typeof a.name === 'string' ? a.name.trim() : ''))
+        .filter(Boolean)
+    : []
+  return [...base, ...custom]
 }
 
 export default function Dispatch() {
@@ -544,8 +573,8 @@ export default function Dispatch() {
         supabase
           .from('booking_occurrences')
           .select(
-            `id, series_id, start_at, end_at, status, cleaner_id,
-             series:booking_series(id, title, lead_id, quote_id, service_address, service_lat, service_lng, lead:extracted_leads(id, name))`
+            `id, series_id, quote_id, start_at, end_at, status, cleaner_id, notes,
+             series:booking_series(id, title, lead_id, quote_id, service_address, service_lat, service_lng, notes, lead:extracted_leads(id, name))`
           )
           .gte('start_at', rangeStart.toISOString())
           .lt('start_at', rangeEnd.toISOString())
@@ -832,17 +861,130 @@ export default function Dispatch() {
     bulkPageSafe * BULK_PAGE_SIZE
   )
 
+  const fetchQuoteForJob = async (job: BookingOccurrence) => {
+    const quoteId = job.quote_id || job.series?.quote_id || null
+    const leadId = job.series?.lead_id || null
+    if (!quoteId && !leadId) return null
+    let query = supabase
+      .from('quotes')
+      .select('service, bedrooms, bathrooms, addons, custom_addons, cleaner_pay, notes, address, created_at')
+    if (quoteId) {
+      query = query.eq('id', quoteId)
+    } else {
+      query = query.eq('lead_id', leadId as string).order('created_at', { ascending: false }).limit(1)
+    }
+    const { data, error } = await query
+    if (error) throw error
+    const q = (data && (data as any[])[0]) as any
+    if (!q) return null
+    return {
+      service: q.service ?? null,
+      bedrooms: typeof q.bedrooms === 'number' ? q.bedrooms : null,
+      bathrooms: typeof q.bathrooms === 'number' ? q.bathrooms : null,
+      addons: Array.isArray(q.addons) ? (q.addons as string[]) : [],
+      customAddons: Array.isArray(q.custom_addons) ? q.custom_addons : [],
+      cleanerPay: typeof q.cleaner_pay === 'number' ? q.cleaner_pay : null,
+      notes: typeof q.notes === 'string' ? q.notes : null,
+      address: typeof q.address === 'string' ? q.address : null,
+    }
+  }
+
+  const buildAssignmentSms = async (job: BookingOccurrence, cleaner: Cleaner) => {
+    const quote = await fetchQuoteForJob(job)
+    const seriesId = job.series?.id
+    const pin = seriesId ? quotePins[seriesId] : null
+    const address =
+      quote?.address ||
+      pin?.address ||
+      job.series?.service_address ||
+      'Address unavailable'
+    const service = quote?.service || job.series?.title || 'Cleaning'
+    const bedBath =
+      typeof quote?.bedrooms === 'number' && typeof quote?.bathrooms === 'number'
+        ? `${quote.bedrooms} bed / ${quote.bathrooms} bath`
+        : 'Bedrooms/bathrooms unavailable'
+    const addons = normalizeAddonList(quote?.addons, quote?.customAddons)
+    const addonsText = addons.length ? addons.join(', ') : 'None'
+    const notes = job.notes || job.series?.notes || quote?.notes || 'None'
+    const dateText = formatDateTime(job.start_at) || job.start_at
+    const cleanerPay = formatCurrency(quote?.cleanerPay) || 'TBC'
+
+    return [
+      `Hi ${cleaner.full_name}, you have been assigned a job.`,
+      `Address: ${address}`,
+      `Type: ${service}`,
+      `Rooms: ${bedBath}`,
+      `Add-ons: ${addonsText}`,
+      `Notes: ${notes}`,
+      `Date: ${dateText}`,
+      `Cleaner pay: ${cleanerPay}`,
+    ].join(' ')
+  }
+
+  const sendCleanerAssignmentSms = async (job: BookingOccurrence, cleaner: Cleaner) => {
+    if (!cleaner.phone || !cleaner.phone.trim()) {
+      throw new Error('Cleaner has no phone number.')
+    }
+    const message = await buildAssignmentSms(job, cleaner)
+    const payload = {
+      infer_country_code: false,
+      to_numbers: [cleaner.phone],
+      user_id: dialpadUserId,
+      text: message,
+    }
+    const response = await fetch(DIALPAD_SMS_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        accept: 'application/json',
+        authorization: `Bearer ${dialpadToken}`,
+      },
+      body: JSON.stringify(payload),
+    })
+    const textBody = await response.text()
+    let parsed: any = null
+    try {
+      parsed = textBody ? JSON.parse(textBody) : null
+    } catch {
+      parsed = null
+    }
+    if (!response.ok || parsed?.error) {
+      const details =
+        typeof parsed?.error === 'string'
+          ? parsed.error
+          : parsed?.error
+          ? JSON.stringify(parsed.error)
+          : textBody || `Failed to send SMS (status ${response.status})`
+      throw new Error(details)
+    }
+  }
+
   const assignCleaner = async (occurrenceId: string, cleanerId: string | null) => {
     setError(null)
     setInfo(null)
     try {
+      const job = jobs.find((j) => j.id === occurrenceId) || null
+      const cleaner = cleanerId ? cleaners.find((c) => c.id === cleanerId) || null : null
       const { error: err } = await supabase
         .from('booking_occurrences')
         .update({ cleaner_id: cleanerId, assigned_at: cleanerId ? new Date().toISOString() : null })
         .eq('id', occurrenceId)
       if (err) throw err
-      setInfo('Cleaner assigned')
+      let smsError: string | null = null
+      if (cleanerId && cleaner) {
+        try {
+          if (!job) throw new Error('Job details not found for SMS.')
+          await sendCleanerAssignmentSms(job, cleaner)
+        } catch (smsErr: any) {
+          smsError = smsErr?.message || 'Failed to send assignment SMS.'
+        }
+      }
       await loadData()
+      if (smsError) {
+        setError(`Cleaner assigned, but SMS failed: ${smsError}`)
+      } else {
+        setInfo('Cleaner assigned')
+      }
     } catch (e: any) {
       setError(e?.message || 'Failed to assign cleaner')
     }

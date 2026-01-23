@@ -111,7 +111,7 @@ function EventDetailModal({
 }: {
   event: CalendarEvent
   onClose: () => void
-  onStatusChange: (occurrenceId: string, status: string) => Promise<void>
+  onStatusChange: (occurrenceId: string, status: string) => Promise<boolean>
   onReschedule: (occurrenceId: string, newStart: Date) => Promise<void>
   cleaners: Cleaner[]
   onAssignCleaner: (occurrenceId: string, cleanerId: string | null) => Promise<void>
@@ -220,8 +220,8 @@ function EventDetailModal({
   const handleStatusChange = async (status: string) => {
     setIsUpdating(true)
     try {
-      await onStatusChange(occurrence.id, status)
-      onClose()
+      const ok = await onStatusChange(occurrence.id, status)
+      if (ok) onClose()
     } finally {
       setIsUpdating(false)
     }
@@ -772,6 +772,7 @@ export default function Calendar() {
 
   // Update occurrence status
   const handleStatusChange = useCallback(async (occurrenceId: string, status: string) => {
+    setActionError(null)
     const { error } = await supabase
       .from('booking_occurrences')
       .update({ status })
@@ -779,7 +780,8 @@ export default function Calendar() {
 
     if (error) {
       console.error('Error updating status:', error)
-      return
+      setActionError(error.message || 'Could not update status. Please try again.')
+      return false
     }
 
     // Refresh events
@@ -817,6 +819,7 @@ export default function Calendar() {
         console.error('Failed to prepare review modal', err)
       }
     }
+    return true
   }, [cleaners, dateRange, events, fetchBookings, selectedEvent])
 
   const handleAssignCleaner = useCallback(

@@ -200,6 +200,18 @@ export default function Dispatch() {
     reviewCount: number
     recentReviews: { rating: number; notes: string | null; created_at: string }[]
     completedJobs: { id: string; start_at: string; series_title: string | null; lead_name: string | null }[]
+    paymentHistory: {
+      id: string
+      occurrence_id: string | null
+      payout_amount: number | null
+      job_total: number | null
+      paid_at: string | null
+      paid_by: string | null
+      notes: string | null
+      start_at: string | null
+      series_title: string | null
+      lead_name: string | null
+    }[]
   } | null>(null)
 
   // Map highlighting state
@@ -1117,12 +1129,38 @@ export default function Dispatch() {
           lead_name: o?.series?.lead?.name ?? null,
         }))
 
+        // Payment history (cleaner payouts)
+        const { data: payouts, error: payoutErr } = await supabase
+          .from('cleaner_payouts')
+          .select(
+            `id, occurrence_id, payout_amount, job_total, paid_at, paid_by, notes, created_at,
+             occurrence:booking_occurrences(start_at, series:booking_series(title, lead:extracted_leads(name)))`
+          )
+          .eq('cleaner_id', cleanerModalId)
+          .order('created_at', { ascending: false })
+          .limit(30)
+        if (payoutErr) throw payoutErr
+
+        const paymentHistory = ((payouts || []) as any[]).map((p) => ({
+          id: p.id as string,
+          occurrence_id: (p.occurrence_id as string | null) ?? null,
+          payout_amount: typeof p.payout_amount === 'number' ? p.payout_amount : null,
+          job_total: typeof p.job_total === 'number' ? p.job_total : null,
+          paid_at: typeof p.paid_at === 'string' ? p.paid_at : null,
+          paid_by: typeof p.paid_by === 'string' ? p.paid_by : null,
+          notes: typeof p.notes === 'string' ? p.notes : null,
+          start_at: typeof p?.occurrence?.start_at === 'string' ? p.occurrence.start_at : null,
+          series_title: p?.occurrence?.series?.title ?? null,
+          lead_name: p?.occurrence?.series?.lead?.name ?? null,
+        }))
+
         setCleanerModalData({
           cleaner,
           avgRating,
           reviewCount,
           recentReviews: list.slice(0, 8),
           completedJobs: completedJobs.slice(0, 12),
+          paymentHistory,
         })
       } catch (e: any) {
         setCleanerModalError(e?.message || 'Failed to load cleaner profile')
@@ -1789,7 +1827,14 @@ export default function Dispatch() {
                           <div className="flex items-start justify-between gap-3">
                             <div className="flex-1 min-w-0 space-y-1">
                               <div className="flex items-center justify-between gap-2">
-                                <div className="text-white font-medium truncate">{cleaner.full_name}</div>
+                                <button
+                                  type="button"
+                                  onClick={() => openCleanerModal(cleaner.id)}
+                                  className="text-white font-medium truncate text-left hover:text-cyan-200 transition-colors"
+                                  title="View cleaner profile"
+                                >
+                                  {cleaner.full_name}
+                                </button>
                                 <div className="text-xs text-[var(--color-text-muted)]">
                                   {currentJobs.length} job{currentJobs.length !== 1 ? 's' : ''}
                                 </div>
@@ -1825,6 +1870,13 @@ export default function Dispatch() {
                               ) : (
                                 <div className="text-xs text-[var(--color-text-muted)]">No reviews yet.</div>
                               )}
+                              <button
+                                type="button"
+                                onClick={() => openCleanerModal(cleaner.id)}
+                                className="text-xs text-cyan-200 hover:text-cyan-100 transition-colors"
+                              >
+                                View history, reviews, and payments →
+                              </button>
                               {!isAvailable && currentJobs.length > 0 && (
                                 <div className="text-xs text-[var(--color-text-muted)] truncate">
                                   Current: {currentJobs.map(j => j.series?.title || 'Job').join(', ')}
@@ -1836,19 +1888,28 @@ export default function Dispatch() {
                                 </div>
                               )}
                             </div>
-                            {hasValidCoords && (
+                            <div className="flex flex-col gap-2 items-end flex-shrink-0">
+                              {hasValidCoords && (
+                                <button
+                                  type="button"
+                                  onClick={() => highlightCleanerOnMap(cleaner.id)}
+                                  className="px-2 py-1.5 text-xs rounded-lg bg-purple-600 hover:bg-purple-700 text-white transition-colors flex items-center gap-1"
+                                  title="View on map"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                                  </svg>
+                                  Map
+                                </button>
+                              )}
                               <button
                                 type="button"
-                                onClick={() => highlightCleanerOnMap(cleaner.id)}
-                                className="px-2 py-1.5 text-xs rounded-lg bg-purple-600 hover:bg-purple-700 text-white transition-colors flex items-center gap-1 flex-shrink-0"
-                                title="View on map"
+                                onClick={() => openCleanerModal(cleaner.id)}
+                                className="px-2 py-1.5 text-xs rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white transition-colors"
                               >
-                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                                </svg>
-                                Map
+                                Profile
                               </button>
-                            )}
+                            </div>
                           </div>
                         </div>
                       )
@@ -1991,6 +2052,53 @@ export default function Dispatch() {
                           <div className="text-sm text-[var(--color-text-muted)]">No completed jobs yet.</div>
                         )}
                       </div>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
+                      <div className="text-white font-semibold mb-2">Payment history</div>
+                      {cleanerModalData?.paymentHistory?.length ? (
+                        <div className="space-y-2">
+                          {cleanerModalData.paymentHistory.map((p) => {
+                            const payoutText =
+                              typeof p.payout_amount === 'number' ? formatCurrency(p.payout_amount) : '—'
+                            const totalText = typeof p.job_total === 'number' ? formatCurrency(p.job_total) : '—'
+                            const paidLabel = p.paid_at ? 'Paid' : 'Unpaid'
+                            return (
+                              <div key={p.id} className="p-3 rounded-xl bg-black/20 border border-white/10">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="text-sm text-white font-medium truncate">
+                                    {p.lead_name || 'Customer'} • {p.series_title || 'Job'}
+                                  </div>
+                                  <span
+                                    className={`text-xs px-2 py-0.5 rounded-full border ${
+                                      p.paid_at
+                                        ? 'bg-emerald-500/20 text-emerald-100 border-emerald-400/50'
+                                        : 'bg-amber-500/20 text-amber-100 border-amber-400/50'
+                                    }`}
+                                  >
+                                    {paidLabel}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-[var(--color-text-muted)]">
+                                  {p.start_at ? new Date(p.start_at).toLocaleString() : 'Date unavailable'}
+                                </div>
+                                <div className="text-xs text-white/80 mt-1">
+                                  Payout: {payoutText} • Job total: {totalText}
+                                </div>
+                                {p.paid_at && (
+                                  <div className="text-xs text-[var(--color-text-muted)]">
+                                    Paid at {new Date(p.paid_at).toLocaleString()}
+                                    {p.paid_by ? ` by ${p.paid_by}` : ''}
+                                  </div>
+                                )}
+                                {p.notes ? <div className="text-xs text-white/70 mt-1">{p.notes}</div> : null}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-[var(--color-text-muted)]">No payout history yet.</div>
+                      )}
                     </div>
                   </>
                 )}

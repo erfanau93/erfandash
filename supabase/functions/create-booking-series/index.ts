@@ -19,7 +19,10 @@ const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 const resendApiKey = Deno.env.get('RESEND_API_KEY') || ''
 const jobWonNotifyEmail = Deno.env.get('JOB_WON_NOTIFY_EMAIL') || ''
-const jobWonEmailFrom = Deno.env.get('JOB_WON_EMAIL_FROM') || ''
+const jobWonEmailFrom =
+  Deno.env.get('JOB_WON_EMAIL_FROM') || 'notifications@sydneypremiumcleaning.com.au'
+const jobWonEmailReplyTo =
+  Deno.env.get('JOB_WON_EMAIL_REPLY_TO') || 'sales@sydneypremiumcleaning.com.au'
 const jobWonAdminUrl =
   Deno.env.get('JOB_WON_ADMIN_URL') || Deno.env.get('ADMIN_DASHBOARD_URL') || ''
 const bookingCustomerEmailFrom =
@@ -278,6 +281,7 @@ async function sendJobWonEmail(params: {
         subject,
         text,
         html,
+        ...(jobWonEmailReplyTo ? { reply_to: jobWonEmailReplyTo } : {}),
       }),
     })
 

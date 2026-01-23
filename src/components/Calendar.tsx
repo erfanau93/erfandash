@@ -111,10 +111,11 @@ function EventDetailModal({
   deletingLeadId,
   mapboxToken,
   mapboxError,
+  actionError,
 }: {
   event: CalendarEvent
   onClose: () => void
-  onStatusChange: (occurrenceId: string, status: string) => Promise<void>
+  onStatusChange: (occurrenceId: string, status: string) => Promise<boolean>
   onReschedule: (occurrenceId: string, newStart: Date) => Promise<void>
   cleaners: Cleaner[]
   onAssignCleaner: (occurrenceId: string, cleanerId: string | null) => Promise<void>
@@ -128,6 +129,7 @@ function EventDetailModal({
   deletingLeadId: string | null
   mapboxToken: string | null
   mapboxError: string | null
+  actionError: string | null
 }) {
   const { occurrence, series, lead } = event.extendedProps
   const [isUpdating, setIsUpdating] = useState(false)
@@ -225,8 +227,8 @@ function EventDetailModal({
   const handleStatusChange = async (status: string) => {
     setIsUpdating(true)
     try {
-      await onStatusChange(occurrence.id, status)
-      onClose()
+      const ok = await onStatusChange(occurrence.id, status)
+      if (ok) onClose()
     } finally {
       setIsUpdating(false)
     }
@@ -493,6 +495,11 @@ function EventDetailModal({
                 </button>
               ))}
             </div>
+            {actionError ? (
+              <div className="mt-3 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm">
+                {actionError}
+              </div>
+            ) : null}
           </div>
 
           {/* Reschedule */}
@@ -775,6 +782,7 @@ export default function Calendar() {
 
   // Update occurrence status
   const handleStatusChange = useCallback(async (occurrenceId: string, status: string) => {
+    setActionError(null)
     const { error } = await supabase
       .from('booking_occurrences')
       .update({ status })
@@ -782,7 +790,8 @@ export default function Calendar() {
 
     if (error) {
       console.error('Error updating status:', error)
-      return
+      setActionError(error.message || 'Could not update status. Please try again.')
+      return false
     }
 
     // Best-effort: sync lead status for completed jobs
@@ -833,6 +842,7 @@ export default function Calendar() {
         console.error('Failed to prepare review modal', err)
       }
     }
+    return true
   }, [cleaners, dateRange, events, fetchBookings, selectedEvent])
 
   const handleAssignCleaner = useCallback(
@@ -1119,6 +1129,7 @@ export default function Calendar() {
           deletingLeadId={deletingLeadId}
           mapboxToken={mapboxToken}
           mapboxError={mapboxError}
+          actionError={actionError}
         />
       )}
 

@@ -24,6 +24,10 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://etiaoqskgplpfy
 const supabaseAnonKey =
   import.meta.env.VITE_SUPABASE_ANON_KEY ||
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV0aWFvcXNrZ3BscGZ5ZGJsem5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcyMzI0NzAsImV4cCI6MjA4MjgwODQ3MH0.c-AlsveEx_bxVgEivga3PRrBp5ylY3He9EJXbaa2N2c'
+const dialpadUserId = '6452247499866112'
+const dialpadToken =
+  'NNRYnLXqJgkWXePcCG2SGCVzHfuB6kxAqQATPvnmn3x6k5RevHUCPdF8zF8jqXsssuyG67bEALxZH9TACsq4aARA46VL4yZ246Kf'
+const dialpadSmsEndpoint = 'https://dialpad.com/api/v2/sms'
 
 type LeadReference = {
   id?: string
@@ -155,6 +159,10 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
   const [stripeLinkUrl, setStripeLinkUrl] = useState<string | null>(null)
   const [stripeLinkError, setStripeLinkError] = useState<string | null>(null)
   const [stripeLinkLoading, setStripeLinkLoading] = useState(false)
+  const [isEmailSending, setIsEmailSending] = useState(false)
+  const [emailError, setEmailError] = useState<string | null>(null)
+  const [isSmsSending, setIsSmsSending] = useState(false)
+  const [smsError, setSmsError] = useState<string | null>(null)
   const [scheduleBooking, setScheduleBooking] = useState(false)
   const [bookingDate, setBookingDate] = useState<string>(getDefaultBookingDate)
   const [bookingTime, setBookingTime] = useState('09:00')
@@ -384,6 +392,24 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
   const clamp10_2 = (val: number) => clampValue(val, 99999999.99)
   const clamp6_2 = (val: number) => clampValue(val, 9999.99)
   const clamp5_2 = (val: number) => clampValue(val, 999.99)
+  const formatCurrency = (val?: number | null) =>
+    typeof val === 'number' && Number.isFinite(val)
+      ? new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(val)
+      : '—'
+  const formatAddons = (addons?: string[] | null, customAddons?: CustomAddOn[] | null) => {
+    const parts: string[] = []
+    if (Array.isArray(addons)) {
+      parts.push(...addons.filter((item) => typeof item === 'string' && item.trim() !== ''))
+    }
+    if (Array.isArray(customAddons)) {
+      customAddons.forEach((addon) => {
+        if (addon?.name && addon.name.trim() !== '') {
+          parts.push(addon.name.trim())
+        }
+      })
+    }
+    return parts.join(', ')
+  }
 
   const handleSaveQuote = async (mode: 'auto' | 'new' = 'auto') => {
     setBookingError(null)
@@ -625,35 +651,151 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
     }
   }
 
-  const mailtoHref = useMemo(() => {
-    if (!latestQuote) return null
-    const subject = encodeURIComponent('Cleaning Quote – Sydney Premium Cleaning')
-    const bodyLines = [
-      `Hi ${lead?.name || 'there'},`,
+  const handleSendQuoteEmail = async () => {
+    if (!latestQuote?.id) {
+      setEmailError('Save the quote before emailing it.')
+      return
+    }
+    const targetEmail = customerEmail || latestQuote.customer_email || lead?.email || ''
+    if (!targetEmail) {
+      setEmailError('Add a customer email before sending.')
+      return
+    }
+
+    setIsEmailSending(true)
+    setEmailError(null)
+    try {
+      const response = await fetch(`${supabaseUrl}/functions/v1/quote-email`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: supabaseAnonKey,
+          Authorization: `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({
+          quoteId: latestQuote.id,
+          shareUrl,
+          emailOverride: targetEmail,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(data?.error || 'Failed to send quote email')
+      }
+      setSaveMessage(`Quote email sent to ${data?.email_to || targetEmail}.`)
+    } catch (err) {
+      console.error('Quote email send failed', err)
+      setEmailError(err instanceof Error ? err.message : 'Failed to send quote email')
+    } finally {
+      setIsEmailSending(false)
+    }
+  }
+
+  const handleSendQuoteSms = async () => {
+    if (!latestQuote?.id) {
+      setSmsError('Save the quote before sending SMS.')
+      return
+    }
+    if (!shareUrl) {
+      setSmsError('Share link unavailable. Save the quote to generate a link.')
+      return
+    }
+    const targetPhone = customerPhone || latestQuote.customer_phone || lead?.phone_number || ''
+    if (!targetPhone) {
+      setSmsError('Add a customer phone number before sending.')
+      return
+    }
+
+    const quoteNumber = latestQuote.quote_number || 'Pending'
+    const customerLabel = customerName || lead?.name || 'there'
+    const addressLabel = address || latestQuote.address || ''
+    const serviceLabel = `${latestQuote.service || 'Cleaning'} clean`
+    const roomsLabel = `${latestQuote.bedrooms} bedroom, ${latestQuote.bathrooms} bathroom`
+    const addonsLabel = formatAddons(latestQuote.addons, latestQuote.custom_addons)
+    const gstLabel = formatCurrency(latestQuote.gst)
+    const totalLabel = formatCurrency(latestQuote.total_inc_gst)
+    const addonsLine = addonsLabel ? `Add-ons: ${addonsLabel}` : ''
+    const addressLine = addressLabel ? `Here is your quote for ${addressLabel}.` : 'Here is your quote.'
+
+    const smsBody = [
+      `Hey ${customerLabel},`,
+      addressLine,
+      `${serviceLabel} — ${roomsLabel}.`,
+      addonsLine,
       '',
-      `Here is your ${latestQuote.service} cleaning quote:`,
-      `Quote #: ${latestQuote.quote_number || 'pending'}`,
-      address ? `Address: ${address}` : '',
-      `- Total (inc GST): $${latestQuote.total_inc_gst?.toFixed(2)}`,
-      `- Deposit: $${latestQuote.deposit_amount?.toFixed(2)} (${latestQuote.deposit_percentage}% )`,
-      `- Remaining Balance: $${latestQuote.remaining_balance?.toFixed(2)}`,
+      'Price breakdown',
+      `GST: ${gstLabel}`,
+      `Total: ${totalLabel}`,
       '',
-      'Pay via direct transfer:',
-      'Account Name: LITTLEFISH AU PTY LTD',
-      'BSB: 062692',
-      'Account: 82781125',
-      `Reference: ${latestQuote.quote_number || 'Your quote number'}`,
+      `Here is the link to the full quote + payment details:`,
+      shareUrl,
       '',
-      shareUrl ? `View it online: ${shareUrl}` : '',
-      '',
-      description ? `Summary: ${description}` : '',
-      'Let me know if you would like to proceed.',
-      '',
-      'Thanks,',
-      'Sydney Premium Cleaning',
-    ].filter(Boolean)
-    return `mailto:${lead?.email || ''}?subject=${subject}&body=${encodeURIComponent(bodyLines.join('\n'))}`
-  }, [latestQuote, lead?.email, lead?.name, shareUrl])
+      'Thanks, get back to me ASAP so I can book you in.',
+    ]
+      .filter((line) => line.trim() !== '')
+      .join('\n')
+
+    setIsSmsSending(true)
+    setSmsError(null)
+    try {
+      const response = await fetch(dialpadSmsEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          accept: 'application/json',
+          authorization: `Bearer ${dialpadToken}`,
+        },
+        body: JSON.stringify({
+          infer_country_code: false,
+          to_numbers: [targetPhone],
+          user_id: dialpadUserId,
+          text: smsBody,
+        }),
+      })
+
+      const textBody = await response.text()
+      let parsed: any = null
+      try {
+        parsed = textBody ? JSON.parse(textBody) : null
+      } catch {
+        parsed = null
+      }
+
+      if (!response.ok || parsed?.error) {
+        const rawError = parsed?.error
+        const errorDetail =
+          typeof rawError === 'string'
+            ? rawError
+            : rawError
+            ? JSON.stringify(rawError)
+            : textBody || `Failed to send SMS (status ${response.status})`
+        throw new Error(errorDetail)
+      }
+
+      const targetLeadId = leadId || editingLeadId
+      if (targetLeadId) {
+        const sentAtIso = new Date().toISOString()
+        const { error: updateError } = await supabase
+          .from('extracted_leads')
+          .update({ last_text_date: sentAtIso, last_text_body: smsBody })
+          .eq('id', targetLeadId)
+        if (updateError) {
+          console.error('Failed to update last_text_date', updateError)
+        }
+      }
+
+      setSaveMessage(`Quote SMS sent to ${targetPhone}.`)
+    } catch (err: any) {
+      console.error('Quote SMS send failed', err)
+      if (err?.message?.includes('Failed to fetch')) {
+        setSmsError('Failed to reach Dialpad. Browser may be blocking the request (CORS). Try again or use a server-side proxy.')
+      } else {
+        setSmsError(err instanceof Error ? err.message : 'Failed to send quote SMS')
+      }
+    } finally {
+      setIsSmsSending(false)
+    }
+  }
 
   const renderResultRow = (label: string, value: string) => (
     <div className="flex items-center justify-between text-sm">
@@ -1349,14 +1491,22 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
             >
               Copy share link
             </button>
-            {mailtoHref && (
-              <a
-                href={mailtoHref}
-                className="w-full inline-flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm py-2"
-              >
-                Email via Outlook (mailto)
-              </a>
-            )}
+            <button
+              onClick={handleSendQuoteEmail}
+              disabled={!latestQuote || isEmailSending}
+              className="w-full inline-flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm py-2 disabled:opacity-60"
+              type="button"
+            >
+              {isEmailSending ? 'Sending quote…' : 'Email quote'}
+            </button>
+            <button
+              onClick={handleSendQuoteSms}
+              disabled={!latestQuote || isSmsSending || !shareUrl}
+              className="w-full inline-flex items-center justify-center rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm py-2 disabled:opacity-60"
+              type="button"
+            >
+              {isSmsSending ? 'Sending SMS…' : 'SMS quote'}
+            </button>
             {shareUrl && (
               <a
                 href={shareUrl}
@@ -1368,6 +1518,16 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
               </a>
             )}
           </div>
+          {emailError && (
+            <div className="p-2 rounded bg-red-500/10 border border-red-500/30 text-red-200 text-xs">
+              {emailError}
+            </div>
+          )}
+          {smsError && (
+            <div className="p-2 rounded bg-red-500/10 border border-red-500/30 text-red-200 text-xs">
+              {smsError}
+            </div>
+          )}
 
           <div
             className={`relative rounded-lg border border-white/10 p-3 space-y-2 bg-black/5 ${

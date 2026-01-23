@@ -706,7 +706,6 @@ export default function QuoteTool({ lead, emailId, autoEditLatest = false }: Quo
       return
     }
 
-    const quoteNumber = latestQuote.quote_number || 'Pending'
     const customerLabel = customerName || lead?.name || 'there'
     const addressLabel = address || latestQuote.address || ''
     const serviceLabel = `${latestQuote.service || 'Cleaning'} clean`

@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
+import { downloadReceiptPdf } from '../lib/receiptPdf'
 
 type QuoteRecord = {
   id: string
@@ -53,6 +54,8 @@ export default function QuotesSent() {
   const [quotes, setQuotes] = useState<QuoteRecord[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [receiptGeneratingId, setReceiptGeneratingId] = useState<string | null>(null)
+  const [receiptError, setReceiptError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All')
   const [sortBy, setSortBy] = useState<'date' | 'amount' | 'customer'>('date')
@@ -179,7 +182,16 @@ export default function QuotesSent() {
       .filter((q) => q.accepted_payment_method === 'card_paid')
       .reduce((sum, q) => sum + (q.total_inc_gst || 0), 0)
     const pendingValue = totalValue - paidValue
-    return { totalValue, paidValue, pendingValue, count: filteredQuotes.length }
+    const projectedProfit = filteredQuotes.reduce((sum, q) => sum + (q.profit || 0), 0)
+    const projectedExpense = filteredQuotes.reduce((sum, q) => sum + (q.cleaner_pay || 0), 0)
+    return {
+      totalValue,
+      paidValue,
+      pendingValue,
+      projectedProfit,
+      projectedExpense,
+      count: filteredQuotes.length,
+    }
   }, [filteredQuotes])
 
   const getQuoteStatus = (quote: QuoteRecord) => {
@@ -191,6 +203,14 @@ export default function QuotesSent() {
     }
     return { label: 'Pending', color: 'bg-amber-500/20 text-amber-300 border-amber-500/40' }
   }
+
+  const businessName = import.meta.env.VITE_BUSINESS_NAME || 'Sydney Premium Cleaning'
+  const businessOperatingName = import.meta.env.VITE_BUSINESS_OPERATING_NAME || 'SYDNEY PREMIUM CLEANING AU'
+  const businessLegalName = import.meta.env.VITE_BUSINESS_LEGAL_NAME || ''
+  const businessAbn = import.meta.env.VITE_BUSINESS_ABN || '95 675 300 875'
+  const businessEmail = import.meta.env.VITE_BUSINESS_EMAIL || 'sales@sydneypremiumcleaning.com.au'
+  const businessPhone = import.meta.env.VITE_BUSINESS_PHONE || '0426413984'
+  const businessAddress = import.meta.env.VITE_BUSINESS_ADDRESS || ''
 
   return (
     <div className="min-h-screen p-4 md:p-6">
@@ -222,7 +242,7 @@ export default function QuotesSent() {
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
           <div className="rounded-xl bg-gradient-to-br from-slate-800/60 to-slate-900/60 border border-white/10 p-4">
             <p className="text-xs text-white/50 uppercase tracking-wider">Total Quotes</p>
             <p className="text-2xl font-bold text-white mt-1">{totals.count}</p>
@@ -230,6 +250,14 @@ export default function QuotesSent() {
           <div className="rounded-xl bg-gradient-to-br from-sky-900/40 to-sky-950/40 border border-sky-500/20 p-4">
             <p className="text-xs text-sky-300/70 uppercase tracking-wider">Total Value</p>
             <p className="text-2xl font-bold text-sky-200 mt-1">${totals.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          </div>
+          <div className="rounded-xl bg-gradient-to-br from-emerald-900/30 to-emerald-950/30 border border-emerald-500/20 p-4">
+            <p className="text-xs text-emerald-300/70 uppercase tracking-wider">Projected Profit</p>
+            <p className="text-2xl font-bold text-emerald-200 mt-1">${totals.projectedProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          </div>
+          <div className="rounded-xl bg-gradient-to-br from-rose-900/30 to-rose-950/30 border border-rose-500/20 p-4">
+            <p className="text-xs text-rose-300/70 uppercase tracking-wider">Projected Expense</p>
+            <p className="text-2xl font-bold text-rose-200 mt-1">${totals.projectedExpense.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
           </div>
           <div className="rounded-xl bg-gradient-to-br from-emerald-900/40 to-emerald-950/40 border border-emerald-500/20 p-4">
             <p className="text-xs text-emerald-300/70 uppercase tracking-wider">Paid</p>
@@ -291,6 +319,12 @@ export default function QuotesSent() {
           </div>
         )}
 
+        {receiptError && (
+          <div className="p-3 rounded-xl bg-red-500/20 border border-red-500/30 text-red-200 text-sm">
+            {receiptError}
+          </div>
+        )}
+
         {/* Quotes List */}
         {isLoading ? (
           <div className="flex items-center justify-center py-16 text-white/50">
@@ -314,6 +348,7 @@ export default function QuotesSent() {
               const status = getQuoteStatus(quote)
               const customerName = quote.customer_name || quote.lead?.name || 'Unknown'
               const customerContact = quote.customer_email || quote.lead?.email || quote.customer_phone || quote.lead?.phone_number || ''
+              const isGeneratingReceipt = receiptGeneratingId === quote.id
 
               return (
                 <div
@@ -369,6 +404,68 @@ export default function QuotesSent() {
                             </svg>
                           </a>
                         )}
+                        <button
+                          disabled={isGeneratingReceipt}
+                          onClick={async () => {
+                            setReceiptError(null)
+                            setReceiptGeneratingId(quote.id)
+                            try {
+                              const paymentMethod =
+                                window.prompt('Payment method for this receipt?', 'Manual')?.trim() || 'Manual'
+
+                              const now = new Date()
+                              const issueDate = now.toLocaleString('en-AU')
+
+                              const receiptNumber = `${quote.quote_number || quote.id}-R-MANUAL`
+                              const customerEmail = quote.customer_email || quote.lead?.email || ''
+
+                              await downloadReceiptPdf({
+                                businessName,
+                                businessOperatingName,
+                                businessLegalName: businessLegalName || undefined,
+                                businessAbn: businessAbn || undefined,
+                                businessEmail: businessEmail || undefined,
+                                businessPhone: businessPhone || undefined,
+                                businessAddress: businessAddress || undefined,
+
+                                receiptNumber,
+                                issueDate,
+                                paymentMethod,
+
+                                customerName: quote.customer_name || quote.lead?.name || 'Client',
+                                customerEmail: customerEmail || undefined,
+
+                                serviceLabel: quote.service || 'Cleaning service',
+                                serviceAddress: quote.address || undefined,
+                                addonsLabel: Array.isArray(quote.addons) && quote.addons.length ? quote.addons.join(', ') : undefined,
+
+                                subtotal: Number(quote.subtotal || 0),
+                                discount: Number(quote.discount_amount || 0),
+                                gst: Number(quote.gst || 0),
+                                total: Number(quote.total_inc_gst || 0),
+                                paidAmount:
+                                  quote.accepted_payment_method === 'card_paid' ? Number(quote.total_inc_gst || 0) : undefined,
+                              })
+                            } catch (err) {
+                              console.error('Receipt PDF generation error', err)
+                              const message =
+                                err && typeof err === 'object' && 'message' in err
+                                  ? String((err as any).message || 'Failed to generate receipt')
+                                  : 'Failed to generate receipt'
+                              setReceiptError(message)
+                            } finally {
+                              setReceiptGeneratingId(null)
+                            }
+                          }}
+                          className={`p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition ${
+                            isGeneratingReceipt ? 'opacity-60 cursor-not-allowed' : ''
+                          }`}
+                          title="Download receipt PDF"
+                        >
+                          <svg className={`w-4 h-4 ${isGeneratingReceipt ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v10m0 0l-3-3m3 3l3-3M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
+                          </svg>
+                        </button>
                         <button
                           onClick={async () => {
                             if (!quote.share_token) return

@@ -16,7 +16,9 @@ import GlobalSearch from './components/GlobalSearch'
 import MainNav from './components/MainNav'
 import Breadcrumbs from './components/Breadcrumbs'
 import NewLeadNotifier from './components/NewLeadNotifier'
+import MarketingLoopNotifier from './components/MarketingLoopNotifier'
 import ManualTodoPopup from './components/ManualTodoPopup'
+import MarketingLoop from './components/MarketingLoop'
 
 function getBreadcrumbs(path: string): Array<{ label: string; href?: string }> {
   const normalizedPath = path.replace(/\/+$/, '') || '/'
@@ -36,6 +38,7 @@ function getBreadcrumbs(path: string): Array<{ label: string; href?: string }> {
     '/quotes-sent': 'Quotes Sent',
     '/repeat-customers': 'Repeat Customers',
     '/todo': 'Todo',
+    '/marketing-loop': 'Marketing Loop',
   }
 
   const breadcrumbs: Array<{ label: string; href?: string }> = [
@@ -221,6 +224,7 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <MarketingLoopNotifier />
         <ManualTodoPopup />
         <SalesFunnel />
         <JobModal />
@@ -238,6 +242,7 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <MarketingLoopNotifier />
         <ManualTodoPopup />
         <Calendar />
         <JobModal />
@@ -255,6 +260,7 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <MarketingLoopNotifier />
         <ManualTodoPopup />
         <CompletedJobs />
         <JobModal />
@@ -272,6 +278,7 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <MarketingLoopNotifier />
         <ManualTodoPopup />
         <Cleaners />
         <JobModal />
@@ -289,6 +296,7 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <MarketingLoopNotifier />
         <ManualTodoPopup />
         <Dispatch />
         <JobModal />
@@ -306,6 +314,7 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <MarketingLoopNotifier />
         <ManualTodoPopup />
         <CleanersPayout />
         <JobModal />
@@ -323,6 +332,7 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <MarketingLoopNotifier />
         <ManualTodoPopup />
         <QuotesSent />
         <JobModal />
@@ -340,6 +350,7 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <MarketingLoopNotifier />
         <ManualTodoPopup />
         <RepeatCustomers />
         <JobModal />
@@ -357,8 +368,27 @@ function App() {
         </div>
         <GlobalSearch />
         <NewLeadNotifier />
+        <MarketingLoopNotifier />
         <ManualTodoPopup />
         <TodoPage />
+        <JobModal />
+      </div>
+    )
+  }
+
+  if (path.endsWith('/marketing-loop')) {
+    return (
+      <div className="animated-bg min-h-screen">
+        {logoutButton}
+        <MainNav />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+          <Breadcrumbs items={breadcrumbs} />
+        </div>
+        <GlobalSearch />
+        <NewLeadNotifier />
+        <MarketingLoopNotifier />
+        <ManualTodoPopup />
+        <MarketingLoop />
         <JobModal />
       </div>
     )
@@ -373,6 +403,7 @@ function App() {
       </div>
       <GlobalSearch />
       <NewLeadNotifier />
+      <MarketingLoopNotifier />
       <ManualTodoPopup />
       <Dashboard />
       {showWebhookLogs && (

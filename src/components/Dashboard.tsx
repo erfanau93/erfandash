@@ -50,7 +50,15 @@ interface ExtractedLead {
   last_text_body?: string | null
 }
 
-const LEAD_STATUS_OPTIONS = ['Unanswered', 'Quote Sent', 'Job Won', 'Jobs Completed', 'Not interested', 'Follow Up']
+const LEAD_STATUS_OPTIONS = [
+  'Unanswered',
+  'Marketing Loop',
+  'Follow Up',
+  'Quote Sent',
+  'Job Won',
+  'Jobs Completed',
+  'Not interested',
+]
 
 const LEAD_STATUS_STYLES: Record<
   string,
@@ -61,6 +69,12 @@ const LEAD_STATUS_STYLES: Record<
     border: 'border-amber-400/40',
     pillBg: 'bg-amber-500/20',
     pillText: 'text-amber-100',
+  },
+  'Marketing Loop': {
+    bg: 'bg-fuchsia-500/5',
+    border: 'border-fuchsia-400/40',
+    pillBg: 'bg-fuchsia-500/20',
+    pillText: 'text-fuchsia-100',
   },
   'Quote Sent': {
     bg: 'bg-sky-500/5',

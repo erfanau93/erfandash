@@ -114,7 +114,33 @@ Tables used:
 
 Side effects:
 - Moving a lead to **Job Won** opens BookingModal to create bookings.
+- Moving a lead to **Marketing Loop** automatically starts SMS + email journeys.
+- Moving a lead away from **Marketing Loop** automatically cancels journeys.
 - Updating status uses the `update-lead-status` Edge Function.
+
+---
+
+### Marketing Loop (`/marketing-loop`)
+Purpose: Monitor and manage automated SMS + email re-engagement campaigns.
+
+Main sections:
+- **Lead list** with status indicators (green = active early/mid, orange = active near end, red = completed/paused/cancelled).
+- **Journey details** per lead: current step, next send time, last send time.
+- **Action buttons**: Pause/Resume, Stop, Send next now.
+
+Tables used:
+- `extracted_leads` (filtered by status = 'Marketing Loop')
+- `marketing_sms_journeys`, `marketing_sms_logs`, `marketing_sms_templates`
+- `marketing_email_journeys`, `marketing_email_logs`, `marketing_email_templates`
+
+Journey schedules:
+- **SMS**: Step 1 (immediate), Step 2 (+3 days), Step 3 (+7 days), Step 4 (+14 days), Step 5 (+14 days), Step 6 (+1 month), Step 7 (+1 month).
+- **Email**: Step 1 (+1 day), Step 2 (+5 days), Step 3 (+14 days), Step 4 (+32 days), Step 5 (+44 days), Step 6 (+79 days), Step 7 (+121 days).
+
+Side effects:
+- Journeys auto-start when lead status changes to "Marketing Loop".
+- Journeys auto-cancel when lead status changes away from "Marketing Loop".
+- The `marketing-loop-runner` cron function sends due messages hourly.
 
 ---
 
@@ -339,6 +365,7 @@ Side effects:
 
 - **Dashboard** → `dialpad_calls`, `dialpad_sms`, `dialpad_emails`, `extracted_leads`, `quotes`, `webhook_logs`
 - **Sales Funnel** → `extracted_leads`, `quotes`, `booking_series`, `booking_occurrences`
+- **Marketing Loop** → `extracted_leads`, `marketing_sms_journeys`, `marketing_sms_logs`, `marketing_email_journeys`, `marketing_email_logs`
 - **Quotes Sent** → `quotes`, `extracted_leads`
 - **Calendar** → `booking_occurrences`, `booking_series`, `extracted_leads`, `cleaners`, `quotes`, `cleaner_job_reviews`
 - **Dispatch** → `booking_occurrences`, `booking_series`, `extracted_leads`, `quotes`, `cleaners`, `cleaner_job_reviews`
@@ -350,6 +377,7 @@ Side effects:
 - **Manual Todo Popup** → `todos`
 - **Communications Log** → `dialpad_calls`, `dialpad_sms`, `dialpad_emails`
 - **Public Quote** → `quotes`, `extracted_leads`
+- **Marketing Loop** → `extracted_leads`, `marketing_sms_journeys`, `marketing_sms_logs`, `marketing_email_journeys`, `marketing_email_logs`
 
 ---
 
@@ -398,9 +426,11 @@ Side effects:
 - `create-payment-link`: Generates Stripe payment links.
 - `create-payment-intent`: Creates Stripe payment intents (not used in UI yet).
 - `stripe-webhook`: Marks quotes/occurrences as paid on Stripe events.
-- `update-lead-status`: Updates `extracted_leads.status`.
+- `update-lead-status`: Updates `extracted_leads.status` and auto-starts/stops Marketing Loop journeys.
 - `get-mapbox-token`: Returns Mapbox token for client-side geocoding.
 - `setup-outlook-webhook`: Creates/list/renew Outlook webhook subscriptions.
+- `marketing-loop-actions`: Manages Marketing Loop journeys (start, pause, resume, cancel, set step).
+- `marketing-loop-runner`: Cron function that sends due SMS/email steps (should run hourly).
 
 ### Edge Functions (referenced by UI, not present in repo)
 - `outlook-email-sync`: Pulls Outlook emails into `dialpad_emails`.
@@ -413,6 +443,34 @@ Side effects:
 - **Stripe**: Payments via payment links & webhooks.
 - **Mapbox**: Address lookup + map pins.
 - **Microsoft Graph**: Outlook email sync/webhooks.
+- **Resend**: Email delivery for Marketing Loop campaigns.
+
+### Scheduled Functions (Cron)
+
+**Marketing Loop Runner** (`marketing-loop-runner`):
+- **Purpose**: Sends due SMS and email messages from Marketing Loop journeys.
+- **Schedule**: Should run **hourly** (every 1 hour).
+- **Setup**:
+  1. Go to Supabase Dashboard → Database → Cron Jobs (or use pg_cron extension)
+  2. Create a cron job that calls the Edge Function:
+     ```sql
+     SELECT cron.schedule(
+       'marketing-loop-runner',
+       '0 * * * *', -- Every hour at minute 0
+       $$
+       SELECT net.http_post(
+         url := 'https://etiaoqskgplpfydblzne.supabase.co/functions/v1/marketing-loop-runner',
+         headers := jsonb_build_object(
+           'Content-Type', 'application/json',
+           'Authorization', 'Bearer YOUR_SERVICE_ROLE_KEY'
+         ),
+         body := '{}'::jsonb
+       ) AS request_id;
+       $$
+     );
+     ```
+  3. Alternatively, use Supabase Dashboard → Edge Functions → `marketing-loop-runner` → Settings → Schedule
+- **Required Secrets**: `DIALPAD_API_KEY`, `RESEND_API_KEY`, `DIALPAD_USER_ID` (optional, defaults to `6452247499866112`)
 
 ---
 
@@ -441,6 +499,10 @@ Side effects:
 
 - **Close out the day**
   - Todo page → Clear all sections and manual tasks.
+
+- **Enroll lead in Marketing Loop**
+  - Sales Funnel → Drag lead to "Marketing Loop" column → Journeys auto-start.
+  - Marketing Loop page → View journey status, pause/resume, or stop.
 
 ---
 

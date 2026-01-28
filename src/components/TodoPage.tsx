@@ -834,6 +834,7 @@ export default function TodoPage() {
                             defaultValue=""
                           >
                             <option value="" disabled>Set status</option>
+                            <option value="Marketing Loop">Marketing Loop</option>
                             <option value="Follow Up">Follow Up</option>
                             <option value="Quote Sent">Quote Sent</option>
                             <option value="Job Won">Job Won</option>

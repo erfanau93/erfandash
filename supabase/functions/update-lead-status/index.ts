@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
+const supabaseAnonKey = Deno.env.get('PUBLIC_SUPABASE_ANON_KEY') || ''
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -55,12 +56,27 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: 'status is required' }, 400)
   }
 
-  const normalizedStatus = statusInput === null ? null : String(statusInput).trim()
+  const normalizedStatus = statusInput === null || statusInput === '' ? null : String(statusInput).trim()
   if (normalizedStatus === '') {
     return jsonResponse({ error: 'status cannot be empty' }, 400)
   }
 
   try {
+    // Get current status before updating
+    const { data: currentLead } = await supabase
+      .from('extracted_leads')
+      .select('id, status')
+      .eq('id', leadId)
+      .maybeSingle()
+
+    if (!currentLead) {
+      return jsonResponse({ error: 'Lead not found' }, 404)
+    }
+
+    const previousStatus = currentLead.status || null
+    const previousStatusNormalized = previousStatus ? String(previousStatus).trim() : null
+
+    // Update status
     const { data, error } = await supabase
       .from('extracted_leads')
       .update({ status: normalizedStatus })
@@ -74,6 +90,66 @@ Deno.serve(async (req) => {
 
     if (!data) {
       return jsonResponse({ error: 'Lead not found' }, 404)
+    }
+
+    // Handle Marketing Loop journey start/stop
+    const supabaseUrlEnv = Deno.env.get('SUPABASE_URL') || supabaseUrl
+    const actionsUrl = `${supabaseUrlEnv}/functions/v1/marketing-loop-actions`
+
+    const actionAuthKey = supabaseAnonKey || supabaseServiceKey
+
+    // If moving TO Marketing Loop, start journeys
+    if (normalizedStatus === 'Marketing Loop' && previousStatusNormalized !== 'Marketing Loop') {
+      try {
+        const journeyResponse = await fetch(actionsUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: actionAuthKey,
+            Authorization: `Bearer ${actionAuthKey}`,
+          },
+          body: JSON.stringify({
+            action: 'start',
+            leadId,
+            journeyType: 'both',
+          }),
+        })
+        
+        if (!journeyResponse.ok) {
+          const journeyError = await journeyResponse.text().catch(() => 'Unknown error')
+          console.error('Failed to start marketing loop journeys:', journeyError)
+        }
+        // Don't fail the status update if journey start fails
+      } catch (journeyErr) {
+        console.error('Failed to start marketing loop journeys:', journeyErr)
+      }
+    }
+
+    // If moving AWAY FROM Marketing Loop, cancel journeys
+    if (previousStatusNormalized === 'Marketing Loop' && normalizedStatus !== 'Marketing Loop') {
+      try {
+        const journeyResponse = await fetch(actionsUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: actionAuthKey,
+            Authorization: `Bearer ${actionAuthKey}`,
+          },
+          body: JSON.stringify({
+            action: 'cancel',
+            leadId,
+            journeyType: 'both',
+          }),
+        })
+        
+        if (!journeyResponse.ok) {
+          const journeyError = await journeyResponse.text().catch(() => 'Unknown error')
+          console.error('Failed to cancel marketing loop journeys:', journeyError)
+        }
+        // Don't fail the status update if journey cancel fails
+      } catch (journeyErr) {
+        console.error('Failed to cancel marketing loop journeys:', journeyErr)
+      }
     }
 
     return jsonResponse({ success: true, leadId: data.id, status: data.status })

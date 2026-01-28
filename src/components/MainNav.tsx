@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 const NAV_ITEMS = [
   { label: 'Dashboard', href: '/' },
   { label: 'Sales Funnel', href: '/salesfunnel' },
+  { label: 'Marketing Loop', href: '/marketing-loop' },
   { label: 'Quotes Sent', href: '/quotes-sent' },
   { label: 'Calendar', href: '/calendar' },
   { label: 'Dispatch', href: '/dispatch' },

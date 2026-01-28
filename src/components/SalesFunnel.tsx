@@ -28,11 +28,12 @@ const dialpadUserId = '6452247499866112'
 const dialpadUrl = `https://dialpad.com/api/v2/users/${dialpadUserId}/initiate_call`
 const dialpadToken = 'NNRYnLXqJgkWXePcCG2SGCVzHfuB6kxAqQATPvnmn3x6k5RevHUCPdF8zF8jqXsssuyG67bEALxZH9TACsq4aARA46VL4yZ246Kf'
 
-const STATUSES = ['Unanswered', 'Follow Up', 'Quote Sent', 'Job Won', 'Not interested', 'Jobs Completed']
+const STATUSES = ['Unanswered', 'Marketing Loop', 'Follow Up', 'Quote Sent', 'Job Won', 'Not interested', 'Jobs Completed']
 
 const STATUS_COLORS: Record<string, { bg: string; border: string; header: string; dot: string }> = {
   '': { bg: 'bg-slate-800/40', border: 'border-slate-600/30', header: 'bg-slate-700/50', dot: 'bg-slate-400' },
   Unanswered: { bg: 'bg-amber-950/30', border: 'border-amber-500/30', header: 'bg-amber-600/20', dot: 'bg-amber-400' },
+  'Marketing Loop': { bg: 'bg-fuchsia-950/30', border: 'border-fuchsia-500/30', header: 'bg-fuchsia-600/20', dot: 'bg-fuchsia-400' },
   'Follow Up': { bg: 'bg-purple-950/30', border: 'border-purple-500/30', header: 'bg-purple-600/20', dot: 'bg-purple-400' },
   'Quote Sent': { bg: 'bg-sky-950/30', border: 'border-sky-500/30', header: 'bg-sky-600/20', dot: 'bg-sky-400' },
   'Job Won': { bg: 'bg-emerald-950/30', border: 'border-emerald-500/30', header: 'bg-emerald-600/20', dot: 'bg-emerald-400' },
@@ -125,7 +126,7 @@ export default function SalesFunnel() {
           apikey: supabaseAnonKey,
           Authorization: `Bearer ${supabaseAnonKey}`,
         },
-        body: JSON.stringify({ leadId, status }),
+        body: JSON.stringify({ leadId, status: status || null }),
       })
 
       let result: any = {}
@@ -134,14 +135,24 @@ export default function SalesFunnel() {
       } catch (jsonError) {
         // If response is not JSON, try to get text
         const text = await response.text().catch(() => 'Unknown error')
+        console.error('Non-JSON response:', text)
         throw new Error(`Server error (${response.status}): ${text || 'Invalid response format'}`)
       }
 
       if (!response.ok || result?.error) {
-        const details = result?.error || `HTTP ${response.status}: Failed to update lead status`
-        console.error('Update lead status error:', { httpStatus: response.status, result, leadId, newStatus: status })
+        const details = result?.error || result?.message || `HTTP ${response.status}: Failed to update lead status`
+        console.error('Update lead status error:', { 
+          httpStatus: response.status, 
+          result, 
+          leadId, 
+          newStatus: status, 
+          previousStatus,
+          fullResponse: JSON.stringify(result, null, 2)
+        })
         throw new Error(details)
       }
+
+      console.log('Status updated successfully:', { leadId, previousStatus, newStatus: status, result })
     } catch (err) {
       console.error('Error updating lead status:', err)
       const errorMessage = err instanceof Error ? err.message : 'Failed to update status'

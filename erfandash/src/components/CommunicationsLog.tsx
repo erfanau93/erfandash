@@ -348,10 +348,59 @@ export default function CommunicationsLog() {
         })
       }
 
+      // Deduplicate calls by call_id
+      const seenCallIds = new Set<string>()
+      const dedupedCalls = callsData.filter((call: DialpadCall) => {
+        if (call.call_id) {
+          if (seenCallIds.has(call.call_id)) return false
+          seenCallIds.add(call.call_id)
+        }
+        return true
+      })
+
+      // Deduplicate SMS by message_id
+      const seenSmsIds = new Set<string>()
+      const dedupedSms = smsData.filter((sms: DialpadSms) => {
+        if (sms.message_id) {
+          if (seenSmsIds.has(sms.message_id)) return false
+          seenSmsIds.add(sms.message_id)
+        }
+        return true
+      })
+
+      // Deduplicate emails by message_id first
+      const seenEmailIds = new Set<string>()
+      const dedupedByMessageId = emailsData.filter((email: DialpadEmail) => {
+        if (email.message_id) {
+          if (seenEmailIds.has(email.message_id)) return false
+          seenEmailIds.add(email.message_id)
+        }
+        return true
+      })
+
+      // Additional deduplication: same subject + from + to + timestamp (within 1 second)
+      // This catches cases where Microsoft Graph creates multiple entries for the same email
+      const seenEmailSignatures = new Set<string>()
+      const dedupedEmails = dedupedByMessageId.filter((email: DialpadEmail) => {
+        const timestamp = new Date(email.created_at).getTime()
+        const roundedTimestamp = Math.floor(timestamp / 1000)
+        const signature = `${email.subject || ''}|${email.from_email || ''}|${email.to_email || ''}|${roundedTimestamp}|${email.direction}`
+        
+        if (seenEmailSignatures.has(signature)) return false
+        seenEmailSignatures.add(signature)
+        return true
+      })
+
+      console.log('[CommunicationsLog] After deduplication:', {
+        calls: `${dedupedCalls.length} (removed ${callsData.length - dedupedCalls.length})`,
+        sms: `${dedupedSms.length} (removed ${smsData.length - dedupedSms.length})`,
+        emails: `${dedupedEmails.length} (removed ${emailsData.length - dedupedEmails.length}, by message_id: ${dedupedByMessageId.length}, by signature: ${dedupedEmails.length})`
+      })
+
       const communications: CommunicationItem[] = []
 
       // Add calls
-      callsData.forEach((call: DialpadCall) => {
+      dedupedCalls.forEach((call: DialpadCall) => {
         communications.push({
           id: call.id,
           type: 'call',
@@ -366,7 +415,7 @@ export default function CommunicationsLog() {
       })
 
       // Add SMS
-      smsData.forEach((sms: DialpadSms) => {
+      dedupedSms.forEach((sms: DialpadSms) => {
         communications.push({
           id: sms.id,
           type: 'sms',
@@ -379,7 +428,7 @@ export default function CommunicationsLog() {
       })
 
       // Add Emails (all emails including leads)
-      emailsData.forEach((email: DialpadEmail) => {
+      dedupedEmails.forEach((email: DialpadEmail) => {
         communications.push({
           id: email.id,
           type: 'email',

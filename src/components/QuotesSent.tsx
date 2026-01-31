@@ -50,6 +50,9 @@ type QuoteRecord = {
 const STATUS_FILTERS = ['All', 'Pending', 'Paid', 'Won'] as const
 type StatusFilter = (typeof STATUS_FILTERS)[number]
 
+const TIME_FILTERS = ['All Time', 'This Week', 'Last Week', 'Last 7 Days', 'Last 30 Days', 'Custom'] as const
+type TimeFilter = (typeof TIME_FILTERS)[number]
+
 export default function QuotesSent() {
   const [quotes, setQuotes] = useState<QuoteRecord[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -58,6 +61,9 @@ export default function QuotesSent() {
   const [receiptError, setReceiptError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All')
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>('All Time')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
   const [sortBy, setSortBy] = useState<'date' | 'amount' | 'customer'>('date')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
 
@@ -127,6 +133,57 @@ export default function QuotesSent() {
   const filteredQuotes = useMemo(() => {
     let result = quotes
 
+    const startOfWeek = (input: Date) => {
+      const d = new Date(input)
+      const day = (d.getDay() + 6) % 7 // Monday = 0
+      d.setHours(0, 0, 0, 0)
+      d.setDate(d.getDate() - day)
+      return d
+    }
+
+    let rangeStart: Date | null = null
+    let rangeEnd: Date | null = null
+
+    if (timeFilter !== 'All Time') {
+      const now = new Date()
+      if (timeFilter === 'This Week') {
+        rangeStart = startOfWeek(now)
+        rangeEnd = now
+      } else if (timeFilter === 'Last Week') {
+        const thisWeekStart = startOfWeek(now)
+        rangeStart = new Date(thisWeekStart)
+        rangeStart.setDate(rangeStart.getDate() - 7)
+        rangeEnd = thisWeekStart
+      } else if (timeFilter === 'Last 7 Days') {
+        rangeStart = new Date(now)
+        rangeStart.setDate(rangeStart.getDate() - 7)
+        rangeStart.setHours(0, 0, 0, 0)
+        rangeEnd = now
+      } else if (timeFilter === 'Last 30 Days') {
+        rangeStart = new Date(now)
+        rangeStart.setDate(rangeStart.getDate() - 30)
+        rangeStart.setHours(0, 0, 0, 0)
+        rangeEnd = now
+      } else if (timeFilter === 'Custom') {
+        if (customStart) {
+          rangeStart = new Date(customStart)
+          rangeStart.setHours(0, 0, 0, 0)
+        }
+        if (customEnd) {
+          rangeEnd = new Date(customEnd)
+          rangeEnd.setHours(23, 59, 59, 999)
+        }
+      }
+
+      result = result.filter((q) => {
+        const createdAt = q.created_at ? new Date(q.created_at) : null
+        if (!createdAt || Number.isNaN(createdAt.getTime())) return false
+        if (rangeStart && createdAt < rangeStart) return false
+        if (rangeEnd && createdAt > rangeEnd) return false
+        return true
+      })
+    }
+
     // Apply status filter
     if (statusFilter !== 'All') {
       result = result.filter((q) => {
@@ -174,22 +231,38 @@ export default function QuotesSent() {
     })
 
     return result
-  }, [quotes, search, statusFilter, sortBy, sortOrder])
+  }, [quotes, search, statusFilter, timeFilter, customStart, customEnd, sortBy, sortOrder])
 
   const totals = useMemo(() => {
     const totalValue = filteredQuotes.reduce((sum, q) => sum + (q.total_inc_gst || 0), 0)
     const paidValue = filteredQuotes
       .filter((q) => q.accepted_payment_method === 'card_paid')
       .reduce((sum, q) => sum + (q.total_inc_gst || 0), 0)
-    const pendingValue = totalValue - paidValue
+    const wonValue = filteredQuotes
+      .filter((q) => q.lead?.status === 'Job Won' && q.accepted_payment_method !== 'card_paid')
+      .reduce((sum, q) => sum + (q.total_inc_gst || 0), 0)
+    const totalSalesValue = paidValue + wonValue
+    const pendingValue = totalValue - totalSalesValue
     const projectedProfit = filteredQuotes.reduce((sum, q) => sum + (q.profit || 0), 0)
     const projectedExpense = filteredQuotes.reduce((sum, q) => sum + (q.cleaner_pay || 0), 0)
+    const salesQuotes = filteredQuotes.filter(
+      (q) => q.accepted_payment_method === 'card_paid' || q.lead?.status === 'Job Won'
+    )
+    const totalSalesExpense = salesQuotes.reduce((sum, q) => sum + (q.cleaner_pay || 0), 0)
+    const totalSalesProfit = salesQuotes.reduce((sum, q) => sum + (q.profit || 0), 0)
+    const projectedProfitMargin = totalValue ? (projectedProfit / totalValue) * 100 : 0
+    const totalSalesProfitMargin = totalSalesValue ? (totalSalesProfit / totalSalesValue) * 100 : 0
     return {
       totalValue,
       paidValue,
+      totalSalesValue,
       pendingValue,
       projectedProfit,
       projectedExpense,
+      totalSalesExpense,
+      totalSalesProfit,
+      projectedProfitMargin,
+      totalSalesProfitMargin,
       count: filteredQuotes.length,
     }
   }, [filteredQuotes])
@@ -242,30 +315,44 @@ export default function QuotesSent() {
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-          <div className="rounded-xl bg-gradient-to-br from-slate-800/60 to-slate-900/60 border border-white/10 p-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-2">
+          <div className="rounded-xl bg-gradient-to-br from-slate-800/60 to-slate-900/60 border border-white/10 p-3">
             <p className="text-xs text-white/50 uppercase tracking-wider">Total Quotes</p>
-            <p className="text-2xl font-bold text-white mt-1">{totals.count}</p>
+            <p className="text-xl font-bold text-white mt-1">{totals.count}</p>
           </div>
-          <div className="rounded-xl bg-gradient-to-br from-sky-900/40 to-sky-950/40 border border-sky-500/20 p-4">
-            <p className="text-xs text-sky-300/70 uppercase tracking-wider">Total Value</p>
-            <p className="text-2xl font-bold text-sky-200 mt-1">${totals.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          <div className="rounded-xl bg-gradient-to-br from-sky-900/40 to-sky-950/40 border border-sky-500/20 p-3">
+            <p className="text-xs text-sky-300/70 uppercase tracking-wider">Total Value (All Quotes)</p>
+            <p className="text-xl font-bold text-sky-200 mt-1">${totals.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
           </div>
-          <div className="rounded-xl bg-gradient-to-br from-emerald-900/30 to-emerald-950/30 border border-emerald-500/20 p-4">
-            <p className="text-xs text-emerald-300/70 uppercase tracking-wider">Projected Profit</p>
-            <p className="text-2xl font-bold text-emerald-200 mt-1">${totals.projectedProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          <div className="rounded-xl bg-gradient-to-br from-emerald-900/30 to-emerald-950/30 border border-emerald-500/20 p-3">
+            <p className="text-xs text-emerald-300/70 uppercase tracking-wider">Projected Profit (All Quotes)</p>
+            <p className="text-xl font-bold text-emerald-200 mt-1">${totals.projectedProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <p className="text-xs text-emerald-300/60 mt-1">{totals.projectedProfitMargin.toFixed(1)}% margin</p>
           </div>
-          <div className="rounded-xl bg-gradient-to-br from-rose-900/30 to-rose-950/30 border border-rose-500/20 p-4">
-            <p className="text-xs text-rose-300/70 uppercase tracking-wider">Projected Expense</p>
-            <p className="text-2xl font-bold text-rose-200 mt-1">${totals.projectedExpense.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          <div className="rounded-xl bg-gradient-to-br from-rose-900/30 to-rose-950/30 border border-rose-500/20 p-3">
+            <p className="text-xs text-rose-300/70 uppercase tracking-wider">Projected Expense (All Quotes)</p>
+            <p className="text-xl font-bold text-rose-200 mt-1">${totals.projectedExpense.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
           </div>
-          <div className="rounded-xl bg-gradient-to-br from-emerald-900/40 to-emerald-950/40 border border-emerald-500/20 p-4">
+          <div className="rounded-xl bg-gradient-to-br from-cyan-900/30 to-cyan-950/30 border border-cyan-500/20 p-3">
+            <p className="text-xs text-cyan-300/70 uppercase tracking-wider">Total Sales (Won + Paid)</p>
+            <p className="text-xl font-bold text-cyan-200 mt-1">${totals.totalSalesValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          </div>
+          <div className="rounded-xl bg-gradient-to-br from-violet-900/30 to-violet-950/30 border border-violet-500/20 p-3">
+            <p className="text-xs text-violet-300/70 uppercase tracking-wider">Sales Expense</p>
+            <p className="text-xl font-bold text-violet-200 mt-1">${totals.totalSalesExpense.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          </div>
+          <div className="rounded-xl bg-gradient-to-br from-teal-900/30 to-teal-950/30 border border-teal-500/20 p-3">
+            <p className="text-xs text-teal-300/70 uppercase tracking-wider">Sales Profit</p>
+            <p className="text-xl font-bold text-teal-200 mt-1">${totals.totalSalesProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <p className="text-xs text-teal-300/60 mt-1">{totals.totalSalesProfitMargin.toFixed(1)}% margin</p>
+          </div>
+          <div className="rounded-xl bg-gradient-to-br from-emerald-900/40 to-emerald-950/40 border border-emerald-500/20 p-3">
             <p className="text-xs text-emerald-300/70 uppercase tracking-wider">Paid</p>
-            <p className="text-2xl font-bold text-emerald-200 mt-1">${totals.paidValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <p className="text-xl font-bold text-emerald-200 mt-1">${totals.paidValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
           </div>
-          <div className="rounded-xl bg-gradient-to-br from-amber-900/40 to-amber-950/40 border border-amber-500/20 p-4">
+          <div className="rounded-xl bg-gradient-to-br from-amber-900/40 to-amber-950/40 border border-amber-500/20 p-3">
             <p className="text-xs text-amber-300/70 uppercase tracking-wider">Pending</p>
-            <p className="text-2xl font-bold text-amber-200 mt-1">${totals.pendingValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <p className="text-xl font-bold text-amber-200 mt-1">${totals.pendingValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
           </div>
         </div>
 
@@ -292,6 +379,36 @@ export default function QuotesSent() {
                 {status}
               </button>
             ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <select
+              value={timeFilter}
+              onChange={(e) => setTimeFilter(e.target.value as TimeFilter)}
+              className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none"
+            >
+              {TIME_FILTERS.map((label) => (
+                <option key={label} value={label}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            {timeFilter === 'Custom' && (
+              <>
+                <input
+                  type="date"
+                  value={customStart}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                  className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none"
+                />
+                <input
+                  type="date"
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                  className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none"
+                />
+              </>
+            )}
           </div>
 
           <select

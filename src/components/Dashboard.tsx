@@ -30,6 +30,11 @@ interface Metrics {
   quotesForUniqueLeads: number
   averageLeadToCallMinutes: number
   medianLeadToCallMinutes: number
+  wonJobs: number
+  wonJobsSetToday: number
+  commsToWonJobRatio: number
+  leadToCallAvgPerWonJob: number
+  leadsToWonJobRatio: number
 }
 
 interface ExtractedLead {
@@ -41,6 +46,7 @@ interface ExtractedLead {
   region_notes?: string | null
   extracted_at?: string | null
   created_at?: string | null
+  updated_at?: string | null
   email_subject?: string | null
   email_created_at?: string | null
   status?: string | null
@@ -372,6 +378,11 @@ export default function Dashboard() {
     quotesForUniqueLeads: 0,
     averageLeadToCallMinutes: 0,
     medianLeadToCallMinutes: 0,
+    wonJobs: 0,
+    wonJobsSetToday: 0,
+    commsToWonJobRatio: 0,
+    leadToCallAvgPerWonJob: 0,
+    leadsToWonJobRatio: 0,
   })
   const [extractedLeads, setExtractedLeads] = useState<ExtractedLead[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -430,38 +441,39 @@ export default function Dashboard() {
       // Use the start of the selected day (or today) as the anchor for comparison window
       const comparisonAnchor = dayStart
 
-      // For comparison chart, fetch the 3-day window ending on the anchor day (local boundaries)
-      const threeDaysAgo = subDays(comparisonAnchor, 3)
-      const threeDaysAgoUTC = new Date(
-        threeDaysAgo.getFullYear(),
-        threeDaysAgo.getMonth(),
-        threeDaysAgo.getDate(),
+      // Fetch enough history for 7-day windows and 30-day averages
+      const lookbackDays = 60
+      const lookbackStart = subDays(comparisonAnchor, lookbackDays)
+      const lookbackStartIso = new Date(
+        lookbackStart.getFullYear(),
+        lookbackStart.getMonth(),
+        lookbackStart.getDate(),
         0, 0, 0, 0
       ).toISOString()
 
-      // Fetch calls for date range (and last 3 days for comparison)
+      // Fetch calls for date range (and lookback window for comparisons)
       const { data: calls, error: callsError } = await supabase
         .from('dialpad_calls')
         .select('*')
-        .gte('created_at', threeDaysAgoUTC)
+        .gte('created_at', lookbackStartIso)
         .order('created_at', { ascending: false })
 
       if (callsError) throw callsError
 
-      // Fetch SMS for date range (and last 3 days for comparison)
+      // Fetch SMS for date range (and lookback window for comparisons)
       const { data: sms, error: smsError } = await supabase
         .from('dialpad_sms')
         .select('*')
-        .gte('created_at', threeDaysAgoUTC)
+        .gte('created_at', lookbackStartIso)
         .order('created_at', { ascending: false })
 
       if (smsError) throw smsError
 
-      // Fetch emails for date range (and last 3 days for comparison)
+      // Fetch emails for date range (and lookback window for comparisons)
       const { data: emails, error: emailsError } = await supabase
         .from('dialpad_emails')
         .select('*')
-        .gte('created_at', threeDaysAgoUTC)
+        .gte('created_at', lookbackStartIso)
         .order('created_at', { ascending: false })
 
       if (emailsError) throw emailsError
@@ -622,6 +634,39 @@ export default function Dashboard() {
         console.error('Error fetching quotes for metrics:', quotesErr)
       }
 
+      const leadDurations = extractedLeadsData
+        .map((lead) => lead.lead_to_call_minutes)
+        .filter((value): value is number => typeof value === 'number' && !Number.isNaN(value))
+      const averageLeadToCallMinutes = (() => {
+        if (leadDurations.length === 0) return 0
+        const sum = leadDurations.reduce((acc, val) => acc + val, 0)
+        return Number((sum / leadDurations.length).toFixed(1))
+      })()
+      const medianLeadToCallMinutes = (() => {
+        if (leadDurations.length === 0) return 0
+        const sorted = [...leadDurations].sort((a, b) => a - b)
+        const mid = Math.floor(sorted.length / 2)
+        const median = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+        return Number(median.toFixed(1))
+      })()
+      const wonLeads = extractedLeadsData.filter((lead) => lead.status === 'Job Won')
+      const wonJobs = wonLeads.length
+      const wonJobsSetToday = wonLeads.filter((lead) => {
+        if (!lead.updated_at) return false
+        const updatedAt = new Date(lead.updated_at).getTime()
+        return updatedAt >= dayStart.getTime() && updatedAt <= dayEnd.getTime()
+      }).length
+      const commsScore = callsOver30s + (smsSent + emailsSent) / 2
+      const commsToWonJobRatio = wonJobsSetToday > 0
+        ? Number((commsScore / wonJobsSetToday).toFixed(2))
+        : 0
+      const leadToCallAvgPerWonJob = wonJobsSetToday > 0
+        ? Number((averageLeadToCallMinutes / wonJobsSetToday).toFixed(2))
+        : 0
+      const leadsToWonJobRatio = wonJobsSetToday > 0
+        ? Number((extractedLeadsData.length / wonJobsSetToday).toFixed(2))
+        : 0
+
       setMetrics({
         uniqueCalls,
         outboundCalls,
@@ -633,25 +678,13 @@ export default function Dashboard() {
         emailsReceived,
         leads: extractedLeadsData.length,
         quotesForUniqueLeads,
-        averageLeadToCallMinutes: (() => {
-          const leadDurations = extractedLeadsData
-            .map((lead) => lead.lead_to_call_minutes)
-            .filter((value): value is number => typeof value === 'number' && !Number.isNaN(value))
-          if (leadDurations.length === 0) return 0
-          const sum = leadDurations.reduce((acc, val) => acc + val, 0)
-          return Number((sum / leadDurations.length).toFixed(1))
-        })(),
-        medianLeadToCallMinutes: (() => {
-          const leadDurations = extractedLeadsData
-            .map((lead) => lead.lead_to_call_minutes)
-            .filter((value): value is number => typeof value === 'number' && !Number.isNaN(value))
-          if (leadDurations.length === 0) return 0
-          const sorted = [...leadDurations].sort((a, b) => a - b)
-          const mid = Math.floor(sorted.length / 2)
-          const median =
-            sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
-          return Number(median.toFixed(1))
-        })(),
+        averageLeadToCallMinutes,
+        medianLeadToCallMinutes,
+        wonJobs,
+        wonJobsSetToday,
+        commsToWonJobRatio,
+        leadToCallAvgPerWonJob,
+        leadsToWonJobRatio,
       })
       setExtractedLeads(extractedLeadsData)
       setLastUpdated(new Date())
@@ -1514,6 +1547,94 @@ export default function Dashboard() {
                   </svg>
                 }
               />
+              {/* Won Jobs */}
+              <MetricCard
+                title={`Total Won Jobs (Set: ${metrics.wonJobsSetToday})`}
+                value={metrics.wonJobs}
+                color="green"
+                isLoading={isLoading}
+                icon={
+                  <svg
+                    className="w-6 h-6 text-white"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M11 5H7a2 2 0 00-2 2v3a6 6 0 006 6 6 6 0 006-6V7a2 2 0 00-2-2h-4m0 0V3m0 2h2m-2 0H9m8 10a4 4 0 01-4 4H9a4 4 0 01-4-4"
+                    />
+                  </svg>
+                }
+              />
+              {/* Communications to Won Jobs Ratio */}
+              <MetricCard
+                title="Comm Score → Won Ratio"
+                value={metrics.commsToWonJobRatio}
+                color="cyan"
+                isLoading={isLoading}
+                icon={
+                  <svg
+                    className="w-6 h-6 text-white"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M7 8h10M7 12h6m-6 4h10M5 4h14a2 2 0 012 2v12a2 2 0 01-2 2H7l-4 4V6a2 2 0 012-2z"
+                    />
+                  </svg>
+                }
+              />
+              {/* Lead to Call Avg per Won Job */}
+              <MetricCard
+                title="Lead → Call Avg / Won Job"
+                value={metrics.leadToCallAvgPerWonJob}
+                color="orange"
+                isLoading={isLoading}
+                icon={
+                  <svg
+                    className="w-6 h-6 text-white"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 8v4l3 3m4-3a7 7 0 11-14 0 7 7 0 0114 0z"
+                    />
+                  </svg>
+                }
+              />
+              {/* Leads to Won Job Ratio */}
+              <MetricCard
+                title="Leads → Won Job Ratio"
+                value={metrics.leadsToWonJobRatio}
+                color="violet"
+                isLoading={isLoading}
+                icon={
+                  <svg
+                    className="w-6 h-6 text-white"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M13 7h8m0 0v8m0-8L13 15M3 17l6-6 4 4 7-7"
+                    />
+                  </svg>
+                }
+              />
               <MetricCard
                 title="Quotes (Unique Leads)"
                 value={metrics.quotesForUniqueLeads}
@@ -1905,10 +2026,22 @@ export default function Dashboard() {
         {/* Charts Section */}
         <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Day Comparison Chart */}
-      <DayComparisonChart calls={allCalls} sms={allSms} emails={allEmails} selectedDate={selectedDate} isLoading={isLoading} />
+          <DayComparisonChart
+            calls={allCalls}
+            sms={allSms}
+            emails={allEmails}
+            selectedDate={selectedDate}
+            isLoading={isLoading}
+            onDateChange={setSelectedDate}
+          />
           
           {/* Hourly Activity */}
-          <HourlyActivity calls={allCalls} selectedDate={selectedDate} isLoading={isLoading} />
+          <HourlyActivity
+            calls={allCalls}
+            selectedDate={selectedDate}
+            isLoading={isLoading}
+            onDateChange={setSelectedDate}
+          />
         </div>
 
         {/* Leads Section */}

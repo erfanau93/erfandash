@@ -3,14 +3,15 @@ import { useEffect, useState } from 'react'
 const NAV_ITEMS = [
   { label: 'Dashboard', href: '/' },
   { label: 'Sales Funnel', href: '/salesfunnel' },
-  { label: 'Marketing Loop', href: '/marketing-loop' },
-  { label: 'Quotes Sent', href: '/quotes-sent' },
   { label: 'Calendar', href: '/calendar' },
   { label: 'Dispatch', href: '/dispatch' },
-  { label: 'Cleaners', href: '/cleaners' },
+  { label: 'Quotes Sent', href: '/quotes-sent' },
   { label: 'Completed Jobs', href: '/completed' },
   { label: 'Cleaners Payout', href: '/cleaners-payout' },
   { label: 'Repeat Customers', href: '/repeat-customers' },
+  { label: 'Marketing Loop', href: '/marketing-loop' },
+  { label: 'Cleaners', href: '/cleaners' },
+  { label: 'Analytics', href: '/analytics', isAnalytics: true },
   { label: 'Todo', href: '/todo', isTodo: true },
 ]
 
@@ -121,6 +122,7 @@ export default function MainNav() {
             {NAV_ITEMS.map((item) => {
               const active = isActivePath(item.href, currentPath)
               const isTodoItem = (item as any).isTodo
+              const isAnalyticsItem = (item as any).isAnalytics
               const hasPendingTodos = isTodoItem && todoCount > 0
 
               return (
@@ -129,15 +131,24 @@ export default function MainNav() {
                   href={item.href}
                   className={`relative px-3 py-2 rounded-xl border text-sm transition-colors ${
                     active
-                      ? 'bg-cyan-500 text-white border-cyan-300/60 shadow-lg shadow-cyan-500/30'
+                      ? isAnalyticsItem
+                        ? 'bg-indigo-500 text-white border-indigo-300/60 shadow-lg shadow-indigo-500/30'
+                        : 'bg-cyan-500 text-white border-cyan-300/60 shadow-lg shadow-cyan-500/30'
                       : hasPendingTodos
                       ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 border-amber-400/50 animate-pulse'
+                      : isAnalyticsItem
+                      ? 'bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-200 border-indigo-400/30'
                       : 'bg-white/5 hover:bg-white/10 text-white border-white/10'
                   } ${hasPendingTodos ? 'ring-2 ring-amber-400/50 ring-offset-1 ring-offset-transparent' : ''}`}
                 >
                   <span className="flex items-center gap-1.5">
                     {isTodoItem && (
                       <span className={`text-base ${hasPendingTodos ? 'animate-bounce' : ''}`}>📋</span>
+                    )}
+                    {isAnalyticsItem && (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                      </svg>
                     )}
                     {item.label}
                     {hasPendingTodos && (

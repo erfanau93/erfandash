@@ -19,6 +19,7 @@ import NewLeadNotifier from './components/NewLeadNotifier'
 import MarketingLoopNotifier from './components/MarketingLoopNotifier'
 import ManualTodoPopup from './components/ManualTodoPopup'
 import MarketingLoop from './components/MarketingLoop'
+import BusinessAnalytics from './components/BusinessAnalytics'
 
 function getBreadcrumbs(path: string): Array<{ label: string; href?: string }> {
   const normalizedPath = path.replace(/\/+$/, '') || '/'
@@ -39,6 +40,7 @@ function getBreadcrumbs(path: string): Array<{ label: string; href?: string }> {
     '/repeat-customers': 'Repeat Customers',
     '/todo': 'Todo',
     '/marketing-loop': 'Marketing Loop',
+    '/analytics': 'Business Analytics',
   }
 
   const breadcrumbs: Array<{ label: string; href?: string }> = [
@@ -389,6 +391,24 @@ function App() {
         <MarketingLoopNotifier />
         <ManualTodoPopup />
         <MarketingLoop />
+        <JobModal />
+      </div>
+    )
+  }
+
+  if (path.endsWith('/analytics')) {
+    return (
+      <div className="animated-bg min-h-screen">
+        {logoutButton}
+        <MainNav />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+          <Breadcrumbs items={breadcrumbs} />
+        </div>
+        <GlobalSearch />
+        <NewLeadNotifier />
+        <MarketingLoopNotifier />
+        <ManualTodoPopup />
+        <BusinessAnalytics />
         <JobModal />
       </div>
     )

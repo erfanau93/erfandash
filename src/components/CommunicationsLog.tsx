@@ -364,11 +364,23 @@ export default function CommunicationsLog({ selectedDate: externalSelectedDate =
 
       // Deduplicate calls by call_id
       const seenCallIds = new Set<string>()
-      const dedupedCalls = callsData.filter((call: DialpadCall) => {
+      const dedupedByCallId = callsData.filter((call: DialpadCall) => {
         if (call.call_id) {
           if (seenCallIds.has(call.call_id)) return false
           seenCallIds.add(call.call_id)
         }
+        return true
+      })
+
+      // Additional deduplication: same contact + timestamp (within 1 second) + direction + duration
+      const seenCallSignatures = new Set<string>()
+      const dedupedCalls = dedupedByCallId.filter((call: DialpadCall) => {
+        const timestamp = new Date(call.created_at).getTime()
+        const roundedTimestamp = Math.floor(timestamp / 1000)
+        const signature = `${call.external_number || ''}|${roundedTimestamp}|${call.direction}|${call.duration ?? ''}`
+
+        if (seenCallSignatures.has(signature)) return false
+        seenCallSignatures.add(signature)
         return true
       })
 
@@ -406,7 +418,7 @@ export default function CommunicationsLog({ selectedDate: externalSelectedDate =
       })
 
       console.log('[CommunicationsLog] After deduplication:', {
-        calls: `${dedupedCalls.length} (removed ${callsData.length - dedupedCalls.length})`,
+        calls: `${dedupedCalls.length} (removed ${callsData.length - dedupedCalls.length}, by call_id: ${dedupedByCallId.length}, by signature: ${dedupedCalls.length})`,
         sms: `${dedupedSms.length} (removed ${smsData.length - dedupedSms.length})`,
         emails: `${dedupedEmails.length} (removed ${emailsData.length - dedupedEmails.length}, by message_id: ${dedupedByMessageId.length}, by signature: ${dedupedEmails.length})`
       })

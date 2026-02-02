@@ -3,6 +3,7 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 import mapboxgl from 'mapbox-gl'
 import { supabase } from '../lib/supabase'
 import { fetchMapboxToken } from '../lib/mapbox'
+import { GlassCard, Button, Badge } from './ui'
 
 type Cleaner = {
   id: string
@@ -1182,13 +1183,20 @@ export default function Dispatch() {
   }, [])
 
   return (
-    <div className="min-h-screen p-6 md:p-8">
+    <div className="min-h-screen p-4 md:p-6 lg:p-8">
       <div className="max-w-7xl mx-auto">
         <header className="mb-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-white mb-2">Dispatch</h1>
-              <p className="text-[var(--color-text-muted)]">Map + quick assignment (simple mode).</p>
+              <h1 className="text-3xl font-bold text-white flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500/30 to-cyan-500/30 border border-emerald-400/30 flex items-center justify-center backdrop-blur-sm">
+                  <svg className="w-6 h-6 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                  </svg>
+                </div>
+                Dispatch
+              </h1>
+              <p className="text-[var(--color-text-muted)] mt-2 text-sm">Map + quick assignment for job scheduling</p>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
               {viewMode === 'month' ? (
@@ -1196,50 +1204,41 @@ export default function Dispatch() {
                   type="month"
                   value={selectedDate.slice(0, 7)}
                   onChange={(e) => setSelectedDate(`${e.target.value}-01`)}
-                  className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white"
+                  className="px-4 py-2.5 rounded-xl glass-card text-white focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/50"
                 />
               ) : (
                 <input
                   type="date"
                   value={selectedDate}
                   onChange={(e) => setSelectedDate(e.target.value)}
-                  className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white"
+                  className="px-4 py-2.5 rounded-xl glass-card text-white focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/50"
                 />
               )}
-              <div className="flex items-center gap-2">
-                <button
+              <div className="flex items-center gap-1 glass-card rounded-xl p-1">
+                <Button
                   onClick={() => setViewMode('day')}
-                  className={`px-3 py-2 text-sm rounded-xl border transition-colors ${
-                    viewMode === 'day'
-                      ? 'bg-cyan-600 text-white border-cyan-500/50'
-                      : 'bg-white/10 hover:bg-white/20 text-white border-white/10'
-                  }`}
+                  variant={viewMode === 'day' ? 'primary' : 'ghost'}
+                  size="sm"
                 >
                   Day
-                </button>
-                <button
+                </Button>
+                <Button
                   onClick={() => setViewMode('week')}
-                  className={`px-3 py-2 text-sm rounded-xl border transition-colors ${
-                    viewMode === 'week'
-                      ? 'bg-cyan-600 text-white border-cyan-500/50'
-                      : 'bg-white/10 hover:bg-white/20 text-white border-white/10'
-                  }`}
+                  variant={viewMode === 'week' ? 'primary' : 'ghost'}
+                  size="sm"
                 >
                   Week
-                </button>
-                <button
+                </Button>
+                <Button
                   onClick={() => setViewMode('month')}
-                  className={`px-3 py-2 text-sm rounded-xl border transition-colors ${
-                    viewMode === 'month'
-                      ? 'bg-cyan-600 text-white border-cyan-500/50'
-                      : 'bg-white/10 hover:bg-white/20 text-white border-white/10'
-                  }`}
+                  variant={viewMode === 'month' ? 'primary' : 'ghost'}
+                  size="sm"
                 >
                   Month
-                </button>
+                </Button>
               </div>
               <div className="flex items-center gap-2">
-                <button
+                <Button
                   onClick={() => {
                     const d = new Date(`${selectedDate}T00:00:00`)
                     const next =
@@ -1250,17 +1249,24 @@ export default function Dispatch() {
                         : addDays(d, -1)
                     setSelectedDate(toYmd(next))
                   }}
-                  className="px-3 py-2 text-sm rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/10"
+                  variant="secondary"
+                  size="sm"
+                  icon={
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                    </svg>
+                  }
                 >
                   Prev
-                </button>
-                <button
+                </Button>
+                <Button
                   onClick={() => setSelectedDate(toYmd(new Date()))}
-                  className="px-3 py-2 text-sm rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/10"
+                  variant="secondary"
+                  size="sm"
                 >
                   Today
-                </button>
-                <button
+                </Button>
+                <Button
                   onClick={() => {
                     const d = new Date(`${selectedDate}T00:00:00`)
                     const next =
@@ -1271,17 +1277,29 @@ export default function Dispatch() {
                         : addDays(d, 1)
                     setSelectedDate(toYmd(next))
                   }}
-                  className="px-3 py-2 text-sm rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/10"
+                  variant="secondary"
+                  size="sm"
+                  icon={
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  }
                 >
                   Next
-                </button>
+                </Button>
               </div>
-              <button
+              <Button
                 onClick={() => setShowCleaners((v) => !v)}
-                className="px-3 py-2 text-sm rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/10"
+                variant="secondary"
+                size="sm"
+                icon={
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d={showCleaners ? "M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" : "M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"} />
+                  </svg>
+                }
               >
                 {showCleaners ? 'Hide cleaners' : 'Show cleaners'}
-              </button>
+              </Button>
             </div>
           </div>
         </header>
@@ -1312,26 +1330,33 @@ export default function Dispatch() {
           {/* Jobs + Bulk SMS */}
           <div className="lg:col-span-2 space-y-4">
             {/* Unassigned */}
-            <div className="rounded-2xl border border-white/10 bg-[var(--color-surface)] overflow-hidden">
+            <GlassCard className="overflow-hidden">
               <div className="p-4 border-b border-white/10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <div className="text-white font-semibold">
-                    Unassigned jobs{' '}
-                    <span className="text-xs text-[var(--color-text-muted)]">({sortedUnassigned.length})</span>
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center">
+                    <svg className="w-4 h-4 text-amber-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
                   </div>
-                  <div className="text-xs text-[var(--color-text-muted)]">Click a job for full details</div>
+                  <div>
+                    <div className="text-white font-semibold">
+                      Unassigned jobs{' '}
+                      <Badge variant="warning" size="sm">{sortedUnassigned.length}</Badge>
+                    </div>
+                    <div className="text-xs text-[var(--color-text-muted)]">Click a job for full details</div>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-white/80">
                   <label className="text-[var(--color-text-muted)]">Sort</label>
                   <select
                     value={unassignedSort}
                     onChange={(e) => setUnassignedSort(e.target.value as any)}
-                    className="bg-white/10 border border-white/10 rounded-lg px-2 py-1 text-xs text-white"
+                    className="bg-white/10 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/50"
                   >
-                    <option value="due_asc">Closest due</option>
-                    <option value="due_desc">Furthest due</option>
-                    <option value="cost_high">Cost high → low</option>
-                    <option value="cost_low">Cost low → high</option>
+                    <option value="due_asc" className="bg-slate-800">Closest due</option>
+                    <option value="due_desc" className="bg-slate-800">Furthest due</option>
+                    <option value="cost_high" className="bg-slate-800">Cost high → low</option>
+                    <option value="cost_low" className="bg-slate-800">Cost low → high</option>
                   </select>
                 </div>
               </div>
@@ -1468,13 +1493,20 @@ export default function Dispatch() {
                   </div>
                 </div>
               )}
-            </div>
+            </GlassCard>
 
             {/* Assigned */}
-            <div className="rounded-2xl border border-white/10 bg-[var(--color-surface)] overflow-hidden">
+            <GlassCard className="overflow-hidden">
               <div className="p-4 border-b border-white/10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-white font-semibold">
-                  Assigned jobs <span className="text-xs text-[var(--color-text-muted)]">({sortedAssigned.length})</span>
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center">
+                    <svg className="w-4 h-4 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <div className="text-white font-semibold">
+                    Assigned jobs <Badge variant="success" size="sm">{sortedAssigned.length}</Badge>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-white/80">
                   <label className="text-[var(--color-text-muted)]">Sort</label>
@@ -1638,14 +1670,23 @@ export default function Dispatch() {
                   </div>
                 </div>
               )}
-            </div>
+            </GlassCard>
 
             {/* Bulk SMS */}
-            <div className="rounded-2xl border border-white/10 bg-[var(--color-surface)] overflow-hidden">
+            <GlassCard className="overflow-hidden">
               <div className="p-4 border-b border-white/10">
-                <div className="text-white font-semibold">Bulk SMS to cleaners</div>
-                <div className="text-xs text-[var(--color-text-muted)] mt-1">
-                  Select cleaners below, write message, then send.
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center">
+                    <svg className="w-4 h-4 text-cyan-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <div className="text-white font-semibold">Bulk SMS to cleaners</div>
+                    <div className="text-xs text-[var(--color-text-muted)]">
+                      Select cleaners below, write message, then send.
+                    </div>
+                  </div>
                 </div>
               </div>
               <div className="p-4 space-y-3">
@@ -1713,34 +1754,65 @@ export default function Dispatch() {
                   placeholder="Type message to send..."
                   className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white text-sm"
                 />
-                <button
+                <Button
                   onClick={sendBulkSms}
                   disabled={smsSending}
-                  className="w-full px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-50"
+                  variant="primary"
+                  className="w-full"
+                  icon={
+                    smsSending ? (
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                      </svg>
+                    )
+                  }
                 >
                   {smsSending ? 'Sending…' : `Send SMS (${selectedCleanerList.length} selected)`}
-                </button>
+                </Button>
               </div>
-            </div>
+            </GlassCard>
           </div>
 
           {/* Map */}
-          <div className="lg:col-span-3 rounded-2xl border border-white/10 bg-[var(--color-surface)] overflow-hidden">
+          <GlassCard className="lg:col-span-3 overflow-hidden">
             <div className="p-4 border-b border-white/10">
-              <div className="text-white font-semibold">Map</div>
-              <div className="text-xs text-[var(--color-text-muted)] mt-1">
-                Jobs: unassigned (orange) / assigned (green). Cleaners are purple and clickable (toggleable).
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center">
+                  <svg className="w-4 h-4 text-indigo-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="text-white font-semibold">Map</div>
+                  <div className="text-xs text-[var(--color-text-muted)]">
+                    Jobs: <span className="text-amber-300">unassigned</span> / <span className="text-emerald-300">assigned</span>. Cleaners are <span className="text-violet-300">purple</span>.
+                  </div>
+                </div>
               </div>
             </div>
             <div ref={mapContainerRef} style={{ height: '72vh', width: '100%' }} />
-          </div>
+          </GlassCard>
 
           {/* Cleaner Side Panel */}
-          <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-[var(--color-surface)] overflow-hidden">
+          <GlassCard className="lg:col-span-2 overflow-hidden">
             <div className="p-4 border-b border-white/10">
-              <div className="text-white font-semibold">Cleaners</div>
-              <div className="text-xs text-[var(--color-text-muted)] mt-1">
-                Available cleaners and their status
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-violet-500/20 border border-violet-500/30 flex items-center justify-center">
+                  <svg className="w-4 h-4 text-violet-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="text-white font-semibold">Cleaners</div>
+                  <div className="text-xs text-[var(--color-text-muted)]">
+                    Available cleaners and their status
+                  </div>
+                </div>
               </div>
             </div>
             <div className="p-4 space-y-4">
@@ -1944,7 +2016,7 @@ export default function Dispatch() {
                 </div>
               )}
             </div>
-          </div>
+          </GlassCard>
         </div>
 
         {/* Cleaner profile modal */}

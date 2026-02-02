@@ -1,6 +1,15 @@
+/**
+ * Dashboard - Apple VisionOS Inspired
+ * 
+ * A calm, powerful command center that shows only what matters now.
+ * Everything is cards. Everything responds. Everything feels alive.
+ */
+
 import { useEffect, useState, useCallback } from 'react'
 import { supabase, supabaseUrl, supabaseAnonKey, type DialpadCall, type DialpadSms, type DialpadEmail } from '../lib/supabase'
 import { playSaveSound } from '../lib/sounds'
+import { subDays } from 'date-fns'
+import { GlassCard, Button, Badge, StatCard, ProgressRing, StreakBadge, LiveIndicator, Skeleton, Encouragement, useToast } from './ui'
 import DatePicker from './DatePicker'
 import DayComparisonChart from './DayComparisonChart'
 import HourlyActivity from './HourlyActivity'
@@ -9,14 +18,8 @@ import QuoteTool from './QuoteTool'
 import Lead from './Lead'
 import SmsLead from './SmsLead'
 import BookingModal from './BookingModal'
-import { subDays } from 'date-fns'
 
-// Supabase client uses VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY internally.
-const dialpadUserId = '6452247499866112'
-const dialpadUrl = `https://dialpad.com/api/v2/users/${dialpadUserId}/initiate_call`
-const dialpadToken =
-  'NNRYnLXqJgkWXePcCG2SGCVzHfuB6kxAqQATPvnmn3x6k5RevHUCPdF8zF8jqXsssuyG67bEALxZH9TACsq4aARA46VL4yZ246Kf'
-
+// Types
 interface Metrics {
   uniqueCalls: number
   outboundCalls: number
@@ -56,6 +59,11 @@ interface ExtractedLead {
   last_text_body?: string | null
 }
 
+const dialpadUserId = '6452247499866112'
+const dialpadUrl = `https://dialpad.com/api/v2/users/${dialpadUserId}/initiate_call`
+const dialpadToken =
+  'NNRYnLXqJgkWXePcCG2SGCVzHfuB6kxAqQATPvnmn3x6k5RevHUCPdF8zF8jqXsssuyG67bEALxZH9TACsq4aARA46VL4yZ246Kf'
+
 const LEAD_STATUS_OPTIONS = [
   'Unanswered',
   'Marketing Loop',
@@ -66,54 +74,7 @@ const LEAD_STATUS_OPTIONS = [
   'Not interested',
 ]
 
-const LEAD_STATUS_STYLES: Record<
-  string,
-  { bg: string; border: string; pillBg: string; pillText: string }
-> = {
-  Unanswered: {
-    bg: 'bg-amber-500/5',
-    border: 'border-amber-400/40',
-    pillBg: 'bg-amber-500/20',
-    pillText: 'text-amber-100',
-  },
-  'Marketing Loop': {
-    bg: 'bg-fuchsia-500/5',
-    border: 'border-fuchsia-400/40',
-    pillBg: 'bg-fuchsia-500/20',
-    pillText: 'text-fuchsia-100',
-  },
-  'Quote Sent': {
-    bg: 'bg-sky-500/5',
-    border: 'border-sky-400/40',
-    pillBg: 'bg-sky-500/20',
-    pillText: 'text-sky-100',
-  },
-  'Job Won': {
-    bg: 'bg-emerald-500/5',
-    border: 'border-emerald-400/40',
-    pillBg: 'bg-emerald-500/20',
-    pillText: 'text-emerald-100',
-  },
-  'Jobs Completed': {
-    bg: 'bg-teal-500/5',
-    border: 'border-teal-400/40',
-    pillBg: 'bg-teal-500/20',
-    pillText: 'text-teal-100',
-  },
-  'Not interested': {
-    bg: 'bg-slate-500/5',
-    border: 'border-slate-400/40',
-    pillBg: 'bg-slate-500/20',
-    pillText: 'text-slate-100',
-  },
-  'Follow Up': {
-    bg: 'bg-purple-500/5',
-    border: 'border-purple-400/40',
-    pillBg: 'bg-purple-500/20',
-    pillText: 'text-purple-100',
-  },
-}
-
+// Helper functions
 function calculateLeadToCallMinutes(lead: ExtractedLead): number | null {
   if (!lead.first_contact) return null
   const startDate = lead.email_created_at || lead.extracted_at || lead.created_at
@@ -133,54 +94,15 @@ function calculateLeadToCallMinutes(lead: ExtractedLead): number | null {
 }
 
 function formatLeadToCallText(minutes: number | null | undefined) {
-  if (minutes === null || minutes === undefined) return 'Not contacted yet'
+  if (minutes === null || minutes === undefined) return 'Not contacted'
   if (minutes < 1) return '<1 min'
-  if (minutes < 60) return `${minutes.toFixed(1)} min`
+  if (minutes < 60) return `${minutes.toFixed(0)} min`
   const hours = minutes / 60
   return `${hours.toFixed(1)} hr`
 }
 
 function isNewLead(lead: ExtractedLead) {
   return !lead.status && !lead.first_contact
-}
-
-function getStatusStyle(status?: string | null) {
-  if (!status) {
-    return {
-      bg: 'bg-[var(--color-surface)]',
-      border: 'border-emerald-500/20',
-      pillBg: 'bg-white/10',
-      pillText: 'text-white',
-    }
-  }
-  return (
-    LEAD_STATUS_STYLES[status] || {
-      bg: 'bg-[var(--color-surface)]',
-      border: 'border-emerald-500/20',
-      pillBg: 'bg-white/10',
-      pillText: 'text-white',
-    }
-  )
-}
-
-function getFirstContactDate(lead: ExtractedLead): Date | null {
-  if (!lead.first_contact) return null
-  if (typeof lead.first_contact === 'number') {
-    const d = new Date(lead.first_contact)
-    return Number.isNaN(d.getTime()) ? null : d
-  }
-  const d = new Date(lead.first_contact)
-  return Number.isNaN(d.getTime()) ? null : d
-}
-
-function getLastTextDate(lead: ExtractedLead): Date | null {
-  if (!lead.last_text_date) return null
-  if (typeof lead.last_text_date === 'number') {
-    const d = new Date(lead.last_text_date)
-    return Number.isNaN(d.getTime()) ? null : d
-  }
-  const d = new Date(lead.last_text_date)
-  return Number.isNaN(d.getTime()) ? null : d
 }
 
 function isValidAusPhone(phone: string) {
@@ -190,7 +112,6 @@ function isValidAusPhone(phone: string) {
 
 function isValidEmail(email: string) {
   const cleaned = email.trim()
-  // Basic email structure validation
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned)
 }
 
@@ -202,125 +123,10 @@ function generateUuid() {
   return `${rand()}${rand()}-${rand()}-${rand()}-${rand()}-${rand()}${rand()}${rand()}`
 }
 
-function MetricCard({
-  title,
-  value,
-  icon,
-  color,
-  isLoading,
-}: {
-  title: string
-  value: number
-  icon: React.ReactNode
-  color: string
-  isLoading: boolean
-}) {
-  const colorClasses: Record<string, string> = {
-    cyan: 'from-cyan-500 to-cyan-600 shadow-cyan-500/20',
-    orange: 'from-orange-500 to-orange-600 shadow-orange-500/20',
-    emerald: 'from-emerald-500 to-emerald-600 shadow-emerald-500/20',
-    violet: 'from-violet-500 to-violet-600 shadow-violet-500/20',
-    blue: 'from-blue-500 to-blue-600 shadow-blue-500/20',
-    green: 'from-green-500 to-green-600 shadow-green-500/20',
-  }
-
-  return (
-    <div className="metric-card glass-card rounded-xl p-3 relative overflow-hidden group">
-      {/* Background gradient accent */}
-      <div
-        className={`absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity duration-300 bg-gradient-to-br ${colorClasses[color]}`}
-      />
-
-      <div className="relative z-10 space-y-2">
-        {/* Icon */}
-        <div
-          className={`w-9 h-9 rounded-lg bg-gradient-to-br ${colorClasses[color]} flex items-center justify-center shadow-md`}
-        >
-          {icon}
-        </div>
-
-        {/* Title */}
-        <h3 className="text-[var(--color-text-muted)] text-[11px] font-medium uppercase tracking-wider">
-          {title}
-        </h3>
-
-        {/* Value */}
-        {isLoading ? (
-          <div className="shimmer h-10 w-20 rounded-lg" />
-        ) : (
-          <p className="text-3xl font-bold text-white font-mono count-animate">
-            {value.toLocaleString()}
-          </p>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function LiveIndicator() {
-  return (
-    <div className="flex items-center gap-2">
-      <div className="relative w-3 h-3">
-        <div className="absolute inset-0 rounded-full bg-emerald-500 pulse-ring" />
-        <div className="absolute inset-0 rounded-full bg-emerald-500" />
-      </div>
-      <span className="text-emerald-400 text-sm font-medium">Live</span>
-    </div>
-  )
-}
-
-type EmailWebhookStatus = {
-  state: 'checking' | 'connected' | 'expired' | 'missing' | 'error'
-  expiresAt?: string
-  message?: string
-}
-
-function EmailWebhookIndicator({ status }: { status: EmailWebhookStatus }) {
-  const colorMap: Record<EmailWebhookStatus['state'], { dot: string; text: string }> = {
-    checking: { dot: 'bg-amber-400', text: 'text-amber-300' },
-    connected: { dot: 'bg-emerald-500', text: 'text-emerald-400' },
-    expired: { dot: 'bg-red-500', text: 'text-red-400' },
-    missing: { dot: 'bg-red-500', text: 'text-red-400' },
-    error: { dot: 'bg-amber-400', text: 'text-amber-300' },
-  }
-
-  const labelMap: Record<EmailWebhookStatus['state'], string> = {
-    checking: 'Email status checking',
-    connected: 'Emails connected',
-    expired: 'Emails not connected',
-    missing: 'Emails not connected',
-    error: 'Email status error',
-  }
-
-  const color = colorMap[status.state]
-  const label = labelMap[status.state]
-  const expiresLabel = status.expiresAt
-    ? `Expires ${new Date(status.expiresAt).toLocaleString()}`
-    : undefined
-  const helper = status.message || expiresLabel
-
-  return (
-    <div className="flex items-center gap-2" title={helper}>
-      <div className="relative w-3 h-3">
-        <div className={`absolute inset-0 rounded-full ${color.dot} ${status.state === 'connected' ? 'pulse-ring' : ''}`} />
-        <div className={`absolute inset-0 rounded-full ${color.dot}`} />
-      </div>
-      <span className={`${color.text} text-sm font-medium`}>{label}</span>
-    </div>
-  )
-}
-
-type PendingQuoteNav = {
-  leadId: string | null
-  editQuoteId: string | null
-}
-
-// Deduplicate strictly by call_id (guaranteed unique by Dialpad).
-// If a row has no call_id, we keep it (no secondary signature).
+// Deduplication functions
 const dedupeCallsBySignature = (calls: DialpadCall[]) => {
   const seenCallIds = new Set<string>()
   const deduped: DialpadCall[] = []
-
   for (const call of calls) {
     if (call.call_id) {
       if (seenCallIds.has(call.call_id)) continue
@@ -328,15 +134,12 @@ const dedupeCallsBySignature = (calls: DialpadCall[]) => {
     }
     deduped.push(call)
   }
-
   return deduped
 }
 
-// Deduplicate SMS strictly by message_id (unique per SMS). Keep rows without message_id.
 const dedupeSmsById = (sms: DialpadSms[]) => {
   const seenMessageIds = new Set<string>()
   const deduped: DialpadSms[] = []
-
   for (const msg of sms) {
     if (msg.message_id) {
       if (seenMessageIds.has(msg.message_id)) continue
@@ -344,15 +147,12 @@ const dedupeSmsById = (sms: DialpadSms[]) => {
     }
     deduped.push(msg)
   }
-
   return deduped
 }
 
-// Deduplicate emails strictly by message_id (unique per email). Keep rows without message_id.
 const dedupeEmailsById = (emails: DialpadEmail[]) => {
   const seenMessageIds = new Set<string>()
   const deduped: DialpadEmail[] = []
-
   for (const email of emails) {
     if (email.message_id) {
       if (seenMessageIds.has(email.message_id)) continue
@@ -360,11 +160,37 @@ const dedupeEmailsById = (emails: DialpadEmail[]) => {
     }
     deduped.push(email)
   }
-
   return deduped
 }
 
+// Status badge variant mapping
+const getStatusBadgeVariant = (status?: string | null): 'default' | 'unanswered' | 'marketing' | 'followup' | 'quote' | 'won' | 'completed' | 'notinterested' => {
+  if (!status) return 'default'
+  const map: Record<string, typeof getStatusBadgeVariant extends (...args: any[]) => infer R ? R : never> = {
+    'Unanswered': 'unanswered',
+    'Marketing Loop': 'marketing',
+    'Follow Up': 'followup',
+    'Quote Sent': 'quote',
+    'Job Won': 'won',
+    'Jobs Completed': 'completed',
+    'Not interested': 'notinterested',
+  }
+  return map[status] || 'default'
+}
+
+// Email webhook status
+type EmailWebhookStatus = {
+  state: 'checking' | 'connected' | 'expired' | 'missing' | 'error'
+  expiresAt?: string
+  message?: string
+}
+
+// =============================================================================
+// MAIN DASHBOARD COMPONENT
+// =============================================================================
+
 export default function Dashboard() {
+  const { addToast } = useToast()
   const [metrics, setMetrics] = useState<Metrics>({
     uniqueCalls: 0,
     outboundCalls: 0,
@@ -387,12 +213,6 @@ export default function Dashboard() {
   const [extractedLeads, setExtractedLeads] = useState<ExtractedLead[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [leadStatusError, setLeadStatusError] = useState<string | null>(null)
-  const [leadCallError, setLeadCallError] = useState<string | null>(null)
-  const [deleteLeadError, setDeleteLeadError] = useState<string | null>(null)
-  const [deletingLeadId, setDeletingLeadId] = useState<string | null>(null)
-  const [callingLeadId, setCallingLeadId] = useState<string | null>(null)
-  const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const [allCalls, setAllCalls] = useState<DialpadCall[]>([])
   const [allSms, setAllSms] = useState<DialpadSms[]>([])
@@ -402,34 +222,30 @@ export default function Dashboard() {
   const [bookingLead, setBookingLead] = useState<ExtractedLead | null>(null)
   const [pendingJobWonLead, setPendingJobWonLead] = useState<ExtractedLead | null>(null)
   const [showManualLeadForm, setShowManualLeadForm] = useState(false)
-  const [pendingQuoteNav, setPendingQuoteNav] = useState<PendingQuoteNav | null>(null)
-  const [manualLead, setManualLead] = useState({
-    name: '',
-    phone_number: '',
-    email: '',
-    region_notes: '',
-  })
-  const [manualLeadError, setManualLeadError] = useState<string | null>(null)
+  const [manualLead, setManualLead] = useState({ name: '', phone_number: '', email: '', region_notes: '' })
   const [savingManualLead, setSavingManualLead] = useState(false)
-  const [emailWebhookStatus, setEmailWebhookStatus] = useState<EmailWebhookStatus>({
-    state: 'checking',
-  })
+  const [callingLeadId, setCallingLeadId] = useState<string | null>(null)
+  const [deletingLeadId, setDeletingLeadId] = useState<string | null>(null)
+  const [emailWebhookStatus, setEmailWebhookStatus] = useState<EmailWebhookStatus>({ state: 'checking' })
+  
+  // Encouragement state
+  const [encouragement, setEncouragement] = useState<{ show: boolean; message: string }>({ show: false, message: '' })
 
-  // Get start of today in UTC (to match database timestamps)
+  // Calculate streak (days with activity)
+  const [streak, setStreak] = useState(0)
+
   const getStartOfToday = useCallback(() => {
     const now = new Date()
-    // Get start of today in UTC, not local time
     const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0))
     return todayUTC.toISOString()
   }, [])
 
-  // Fetch all metrics
+  // Fetch metrics
   const fetchMetrics = useCallback(async () => {
     try {
       setError(null)
       const todayStartIso = getStartOfToday()
 
-      // Determine date range based on selected date (use local day bounds so all widgets agree)
       const dayStart = selectedDate
         ? new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 0, 0, 0, 0)
         : new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate(), 0, 0, 0, 0)
@@ -437,11 +253,8 @@ export default function Dashboard() {
 
       const dateStartIso = selectedDate ? dayStart.toISOString() : todayStartIso
       const dateEndIso = dayEnd.toISOString()
-
-      // Use the start of the selected day (or today) as the anchor for comparison window
       const comparisonAnchor = dayStart
 
-      // Fetch enough history for 7-day windows and 30-day averages
       const lookbackDays = 60
       const lookbackStart = subDays(comparisonAnchor, lookbackDays)
       const lookbackStartIso = new Date(
@@ -451,7 +264,6 @@ export default function Dashboard() {
         0, 0, 0, 0
       ).toISOString()
 
-      // Fetch calls for date range (and lookback window for comparisons)
       const { data: calls, error: callsError } = await supabase
         .from('dialpad_calls')
         .select('*')
@@ -460,7 +272,6 @@ export default function Dashboard() {
 
       if (callsError) throw callsError
 
-      // Fetch SMS for date range (and lookback window for comparisons)
       const { data: sms, error: smsError } = await supabase
         .from('dialpad_sms')
         .select('*')
@@ -469,7 +280,6 @@ export default function Dashboard() {
 
       if (smsError) throw smsError
 
-      // Fetch emails for date range (and lookback window for comparisons)
       const { data: emails, error: emailsError } = await supabase
         .from('dialpad_emails')
         .select('*')
@@ -482,36 +292,18 @@ export default function Dashboard() {
       const typedSms = (sms || []) as DialpadSms[]
       const typedEmails = (emails || []) as DialpadEmail[]
       
-      // Debug: Log raw call count before deduplication
-      console.log(`[Dashboard] Raw calls fetched: ${typedCalls.length}`)
-      
       const dedupedCalls = dedupeCallsBySignature(typedCalls)
-      
-      // Debug: Log deduplicated call count
-      console.log(`[Dashboard] Calls after deduplication: ${dedupedCalls.length} (removed ${typedCalls.length - dedupedCalls.length} duplicates)`)
-      
-      // Store all data for charts
       const dedupedSms = dedupeSmsById(typedSms)
       const dedupedEmails = dedupeEmailsById(typedEmails)
+      
       setAllCalls(dedupedCalls)
       setAllSms(dedupedSms)
       setAllEmails(dedupedEmails)
 
-      // Filter data for selected date (or today if none selected)
-      // Use direct ISO string comparison to avoid timezone issues
       const filteredCalls = dedupedCalls.filter(c => {
         const callTs = new Date(c.created_at).getTime()
         return callTs >= dayStart.getTime() && callTs <= dayEnd.getTime()
       })
-      
-      // Debug: Log filtered call count and date range
-      console.log(`[Dashboard] Date range: ${dateStartIso} to ${dateEndIso}`)
-      console.log(`[Dashboard] Calls after date filtering: ${filteredCalls.length}`)
-      if (filteredCalls.length > 0) {
-        const firstCall = filteredCalls[0].created_at
-        const lastCall = filteredCalls[filteredCalls.length - 1].created_at
-        console.log(`[Dashboard] First call in range: ${firstCall}, Last call: ${lastCall}`)
-      }
       
       const filteredSms = dedupedSms.filter(s => {
         const smsTs = new Date(s.created_at).getTime()
@@ -523,7 +315,6 @@ export default function Dashboard() {
         return emailTs >= dayStart.getTime() && emailTs <= dayEnd.getTime()
       })
 
-      // Calculate metrics for selected date
       const uniqueCalls = filteredCalls.length
       const outboundCalls = filteredCalls.filter((c) => c.direction === 'outbound').length
       const inboundCalls = filteredCalls.filter((c) => c.direction === 'inbound').length
@@ -533,7 +324,7 @@ export default function Dashboard() {
       const emailsSent = filteredEmails.filter((e) => e.direction === 'outbound').length
       const emailsReceived = filteredEmails.filter((e) => e.direction === 'inbound').length
 
-      // Helper function to check if an email is a lead email
+      // Fetch leads
       const isLeadEmail = (subject: string | null): boolean => {
         if (!subject) return false
         const normalizedSubject = subject
@@ -550,9 +341,6 @@ export default function Dashboard() {
         return leadPatterns.some(pattern => pattern.test(normalizedSubject))
       }
 
-      // Build filters for extracted leads:
-      // - Leads linked to filtered lead emails
-      // - Leads created/extracted inside the selected date window (to include manual adds)
       const leadEmailIds = filteredEmails
         .filter((e) => isLeadEmail(e.subject))
         .map((e) => e.id)
@@ -582,12 +370,9 @@ export default function Dashboard() {
         if (extractedLeadsError) {
           console.error('Error fetching extracted leads:', extractedLeadsError)
         } else if (extractedLeads) {
-          // Deduplicate extracted leads by id (in case OR query returns duplicates)
           const seenLeadIds = new Set<string>()
           const uniqueExtractedLeads = extractedLeads.filter((lead: any) => {
-            if (seenLeadIds.has(lead.id)) {
-              return false
-            }
+            if (seenLeadIds.has(lead.id)) return false
             seenLeadIds.add(lead.id)
             return true
           })
@@ -608,10 +393,9 @@ export default function Dashboard() {
         }
       } catch (extractedLeadsErr) {
         console.error('Error fetching extracted leads:', extractedLeadsErr)
-        // Don't fail the whole function if extracted leads query fails
       }
 
-      // Fetch quotes to count unique leads quoted during the window
+      // Fetch quotes
       let quotesForUniqueLeads = 0
       try {
         const { data: quotesData, error: quotesError } = await supabase
@@ -637,11 +421,13 @@ export default function Dashboard() {
       const leadDurations = extractedLeadsData
         .map((lead) => lead.lead_to_call_minutes)
         .filter((value): value is number => typeof value === 'number' && !Number.isNaN(value))
+      
       const averageLeadToCallMinutes = (() => {
         if (leadDurations.length === 0) return 0
         const sum = leadDurations.reduce((acc, val) => acc + val, 0)
         return Number((sum / leadDurations.length).toFixed(1))
       })()
+      
       const medianLeadToCallMinutes = (() => {
         if (leadDurations.length === 0) return 0
         const sorted = [...leadDurations].sort((a, b) => a - b)
@@ -649,6 +435,7 @@ export default function Dashboard() {
         const median = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
         return Number(median.toFixed(1))
       })()
+      
       const wonLeads = extractedLeadsData.filter((lead) => lead.status === 'Job Won')
       const wonJobs = wonLeads.length
       const wonJobsSetToday = wonLeads.filter((lead) => {
@@ -656,16 +443,11 @@ export default function Dashboard() {
         const updatedAt = new Date(lead.updated_at).getTime()
         return updatedAt >= dayStart.getTime() && updatedAt <= dayEnd.getTime()
       }).length
+      
       const commsScore = callsOver30s + (smsSent + emailsSent) / 2
-      const commsToWonJobRatio = wonJobsSetToday > 0
-        ? Number((commsScore / wonJobsSetToday).toFixed(2))
-        : 0
-      const leadToCallAvgPerWonJob = wonJobsSetToday > 0
-        ? Number((averageLeadToCallMinutes / wonJobsSetToday).toFixed(2))
-        : 0
-      const leadsToWonJobRatio = wonJobsSetToday > 0
-        ? Number((extractedLeadsData.length / wonJobsSetToday).toFixed(2))
-        : 0
+      const commsToWonJobRatio = wonJobsSetToday > 0 ? Number((commsScore / wonJobsSetToday).toFixed(2)) : 0
+      const leadToCallAvgPerWonJob = wonJobsSetToday > 0 ? Number((averageLeadToCallMinutes / wonJobsSetToday).toFixed(2)) : 0
+      const leadsToWonJobRatio = wonJobsSetToday > 0 ? Number((extractedLeadsData.length / wonJobsSetToday).toFixed(2)) : 0
 
       setMetrics({
         uniqueCalls,
@@ -687,7 +469,28 @@ export default function Dashboard() {
         leadsToWonJobRatio,
       })
       setExtractedLeads(extractedLeadsData)
-      setLastUpdated(new Date())
+
+      // Calculate streak
+      let currentStreak = 0
+      const today = new Date()
+      for (let i = 0; i < 30; i++) {
+        const checkDate = subDays(today, i)
+        const dayStart = new Date(checkDate.getFullYear(), checkDate.getMonth(), checkDate.getDate())
+        const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000)
+        
+        const hasActivity = dedupedCalls.some(c => {
+          const ts = new Date(c.created_at).getTime()
+          return ts >= dayStart.getTime() && ts < dayEnd.getTime() && c.duration > 30
+        })
+        
+        if (hasActivity) {
+          currentStreak++
+        } else if (i > 0) {
+          break
+        }
+      }
+      setStreak(currentStreak)
+
     } catch (err) {
       console.error('Error fetching metrics:', err)
       setError(err instanceof Error ? err.message : 'Failed to fetch metrics')
@@ -696,13 +499,12 @@ export default function Dashboard() {
     }
   }, [getStartOfToday, selectedDate])
 
+  // Fetch email webhook status
   const fetchEmailWebhookStatus = useCallback(async () => {
     setEmailWebhookStatus((prev) => ({ ...prev, state: 'checking', message: undefined }))
     try {
       const response = await fetch(`${supabaseUrl}/functions/v1/setup-outlook-webhook`)
-      if (!response.ok) {
-        throw new Error(`Status ${response.status}`)
-      }
+      if (!response.ok) throw new Error(`Status ${response.status}`)
       const data = await response.json()
       const subscriptions = Array.isArray(data?.value) ? data.value : []
       const outlookSubscriptions = subscriptions.filter((sub: { notificationUrl?: string }) =>
@@ -747,187 +549,74 @@ export default function Dashboard() {
   }, [])
 
   // Initial fetch and realtime subscription
-  // Capture URL parameters once on mount for quote navigation
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const leadId = params.get('lead')
-    const editQuoteId = params.get('editQuote')
-    if (leadId || editQuoteId) {
-      setPendingQuoteNav({ leadId, editQuoteId })
-    }
-  }, [])
-
-  // When leads are loaded (or fetched), open the quote modal and optionally clean the URL
-  useEffect(() => {
-    if (!pendingQuoteNav) return
-    const { leadId, editQuoteId } = pendingQuoteNav
-    if (!leadId) return
-
-    const found = extractedLeads.find((l) => l.id === leadId)
-    if (found) {
-      setQuoteLead(found)
-
-      if (editQuoteId) {
-        const params = new URLSearchParams(window.location.search)
-        params.delete('editQuote')
-        const cleaned = params.toString()
-        const newUrl = window.location.pathname + (cleaned ? `?${cleaned}` : '')
-        window.history.replaceState({}, '', newUrl)
-      }
-      setPendingQuoteNav(null)
-      return
-    }
-
-    // Fallback: fetch the lead directly if not in the current list
-    let cancelled = false
-    const fetchLead = async () => {
-      const { data, error } = await supabase.from('extracted_leads').select('*').eq('id', leadId).maybeSingle()
-      if (cancelled) return
-      if (!error && data) {
-        const lead = data as ExtractedLead
-        setQuoteLead(lead)
-        // Optionally append so future renders know about it
-        setExtractedLeads((prev) => (prev.find((l) => l.id === lead.id) ? prev : [lead, ...prev]))
-
-        if (editQuoteId) {
-          const params = new URLSearchParams(window.location.search)
-          params.delete('editQuote')
-          const cleaned = params.toString()
-          const newUrl = window.location.pathname + (cleaned ? `?${cleaned}` : '')
-          window.history.replaceState({}, '', newUrl)
-        }
-        setPendingQuoteNav(null)
-      }
-    }
-    fetchLead()
-    return () => {
-      cancelled = true
-    }
-  }, [pendingQuoteNav, extractedLeads])
-
   useEffect(() => {
     fetchMetrics()
     fetchEmailWebhookStatus()
     const emailStatusInterval = setInterval(fetchEmailWebhookStatus, 5 * 60 * 1000)
 
-    // Subscribe to realtime changes on dialpad_calls
+    // Realtime subscriptions
     const callsChannel = supabase
       .channel('dialpad_calls_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'dialpad_calls',
-        },
-        () => {
-          console.log('Call data changed, refreshing...')
-          fetchMetrics()
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dialpad_calls' }, () => fetchMetrics())
       .subscribe()
 
-    // Subscribe to realtime changes on dialpad_sms
     const smsChannel = supabase
       .channel('dialpad_sms_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'dialpad_sms',
-        },
-        () => {
-          console.log('SMS data changed, refreshing...')
-          fetchMetrics()
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dialpad_sms' }, () => fetchMetrics())
       .subscribe()
 
-    // Subscribe to realtime changes on dialpad_emails
     const emailsChannel = supabase
       .channel('dialpad_emails_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'dialpad_emails',
-        },
-        (payload) => {
-          console.log('Email data changed, refreshing...')
-          // Check if this is a lead email - if so, wait a bit for extraction to complete
-          const email = payload.new as any
-          const isLeadEmail = email?.subject && (
-            /^New message from\s+"[^"]+"$/i.test(email.subject.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#39;/g, "'").trim()) ||
-            /^New message from\s+'[^']+'$/i.test(email.subject.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#39;/g, "'").trim()) ||
-            /^New Meta Lead$/i.test(email.subject.trim()) ||
-            /^New Entry - Lead Form$/i.test(email.subject.trim())
-          )
-          
-          if (isLeadEmail && payload.eventType === 'INSERT') {
-            // Wait a bit for extraction to complete, then refresh
-            // Also check again after a longer delay in case extraction takes longer
-            setTimeout(() => {
-              console.log('Lead email detected, refreshing after extraction delay...')
-              fetchMetrics()
-            }, 3000) // 3 second delay for OpenAI extraction
-            
-            // Fallback: check again after 8 seconds in case extraction is slow
-            setTimeout(() => {
-              console.log('Follow-up refresh for lead email extraction...')
-              fetchMetrics()
-            }, 8000)
-          } else {
-            fetchMetrics()
-          }
-        }
-      )
-      .subscribe()
-
-    // Subscribe to realtime changes on extracted_leads
-    const extractedLeadsChannel = supabase
-      .channel('extracted_leads_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'extracted_leads',
-        },
-        (payload) => {
-          console.log(payload.eventType === 'INSERT' ? 'New extracted lead inserted, refreshing immediately...' : 'Extracted leads changed, refreshing...')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dialpad_emails' }, (payload) => {
+        const email = payload.new as any
+        const isLead = email?.subject && (
+          /^New message from\s+"[^"]+"$/i.test(email.subject.replace(/&quot;/g, '"').trim()) ||
+          /^New Meta Lead$/i.test(email.subject.trim())
+        )
+        
+        if (isLead && payload.eventType === 'INSERT') {
+          setTimeout(fetchMetrics, 3000)
+          setTimeout(fetchMetrics, 8000)
+        } else {
           fetchMetrics()
         }
-      )
+      })
       .subscribe()
 
-    // Cleanup subscriptions on unmount
+    const extractedLeadsChannel = supabase
+      .channel('extracted_leads_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'extracted_leads' }, () => fetchMetrics())
+      .subscribe()
+
+    // Listen for sync-emails event from command palette
+    const handleSyncEmails = () => handleSyncEmailsAction()
+    window.addEventListener('sync-emails', handleSyncEmails)
+
     return () => {
       clearInterval(emailStatusInterval)
       supabase.removeChannel(callsChannel)
       supabase.removeChannel(smsChannel)
       supabase.removeChannel(emailsChannel)
       supabase.removeChannel(extractedLeadsChannel)
+      window.removeEventListener('sync-emails', handleSyncEmails)
     }
   }, [fetchMetrics, fetchEmailWebhookStatus])
 
+  // Action handlers
   const handleRefresh = () => {
     setIsLoading(true)
     fetchMetrics()
+    addToast({ type: 'info', title: 'Refreshing data...', duration: 2000 })
   }
 
-  const handleSyncEmails = async () => {
+  const handleSyncEmailsAction = async () => {
     try {
       setIsLoading(true)
+      addToast({ type: 'info', title: 'Syncing emails...', message: 'Pulling latest from Outlook' })
+      
       const response = await fetch(
         'https://etiaoqskgplpfydblzne.supabase.co/functions/v1/outlook-email-sync',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        }
+        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
       )
       
       if (!response.ok) {
@@ -936,16 +625,13 @@ export default function Dashboard() {
       }
       
       const result = await response.json()
-      console.log('Email sync result:', result)
+      addToast({ type: 'success', title: 'Emails synced', message: `${result.synced || 0} new emails processed` })
       
-      // Refresh metrics after sync
-      setTimeout(() => {
-        fetchMetrics()
-      }, 1000)
+      setTimeout(fetchMetrics, 1000)
       fetchEmailWebhookStatus()
     } catch (err) {
       console.error('Error syncing emails:', err)
-      setError(err instanceof Error ? err.message : 'Failed to sync emails')
+      addToast({ type: 'error', title: 'Sync failed', message: err instanceof Error ? err.message : 'Unknown error' })
     } finally {
       setIsLoading(false)
     }
@@ -955,17 +641,13 @@ export default function Dashboard() {
     const lead = extractedLeads.find((l) => l.id === leadId)
     const previousStatus = lead?.status || ''
 
-    // If changing to "Job Won", show booking modal first (unless skipping)
     if (status === 'Job Won' && !skipBookingPrompt && lead) {
       setPendingJobWonLead(lead)
       return
     }
 
     try {
-      setLeadStatusError(null)
       setSavingStatusId(leadId)
-
-      // Optimistic update to match Sales Funnel behaviour
       setExtractedLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status: status || null } : l)))
 
       const response = await fetch(`${supabaseUrl}/functions/v1/update-lead-status`, {
@@ -981,21 +663,37 @@ export default function Dashboard() {
       let result: any = {}
       try {
         result = await response.json()
-      } catch (jsonError) {
+      } catch {
         const text = await response.text().catch(() => 'Unknown error')
         throw new Error(`Server error (${response.status}): ${text || 'Invalid response format'}`)
       }
 
       if (!response.ok || result?.error) {
-        const details = result?.error || `HTTP ${response.status}: Failed to update lead status`
-        console.error('Update lead status error:', { httpStatus: response.status, result, leadId, newStatus: status })
-        throw new Error(details)
+        throw new Error(result?.error || `HTTP ${response.status}: Failed to update lead status`)
       }
+
+      // Show success toast with contextual message
+      const statusMessages: Record<string, string> = {
+        'Job Won': '🎉 Nice! Job won.',
+        'Quote Sent': '📧 Quote sent to customer',
+        'Follow Up': '📞 Scheduled for follow-up',
+        'Not interested': 'Lead archived',
+      }
+      
+      addToast({ 
+        type: 'success', 
+        title: statusMessages[status || ''] || 'Status updated',
+        duration: 3000 
+      })
+
+      // Show encouragement for wins
+      if (status === 'Job Won') {
+        setEncouragement({ show: true, message: 'Another win! Keep it up.' })
+      }
+
     } catch (err) {
       console.error('Error updating lead status:', err)
-      const errorMessage = err instanceof Error ? err.message : 'Failed to update lead status'
-      setLeadStatusError(errorMessage)
-      // Revert on error
+      addToast({ type: 'error', title: 'Update failed', message: err instanceof Error ? err.message : 'Unknown error' })
       setExtractedLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status: previousStatus || null } : l)))
       fetchMetrics()
     } finally {
@@ -1003,38 +701,15 @@ export default function Dashboard() {
     }
   }
 
-  // Handle booking modal success
-  const handleBookingSuccess = () => {
-    setPendingJobWonLead(null)
-    setBookingLead(null)
-    fetchMetrics() // Refresh to get updated status
-  }
-
-  // Handle booking modal skip - just update status without booking
-  const handleBookingSkip = () => {
-    if (pendingJobWonLead) {
-      handleUpdateLeadStatus(pendingJobWonLead.id, 'Job Won', true)
-    }
-    setPendingJobWonLead(null)
-    setBookingLead(null)
-  }
-
-  // Handle booking modal cancel
-  const handleBookingCancel = () => {
-    setPendingJobWonLead(null)
-    setBookingLead(null)
-  }
-
   const handleCallLead = async (leadId: string, phoneNumber?: string | null) => {
     if (!phoneNumber) {
-      setLeadCallError('No phone number available for this lead.')
+      addToast({ type: 'warning', title: 'No phone number', message: 'This lead has no phone number' })
       return
     }
 
     const leadRecord = extractedLeads.find((lead) => lead.id === leadId)
     const hasFirstContact = Boolean(leadRecord?.first_contact)
 
-    setLeadCallError(null)
     setCallingLeadId(leadId)
     try {
       const response = await fetch(dialpadUrl, {
@@ -1049,13 +724,12 @@ export default function Dashboard() {
 
       const result = await response.json().catch(() => ({}))
       if (!response.ok || result?.error) {
-        const details = result?.error || 'Failed to initiate call'
-        throw new Error(details)
+        throw new Error(result?.error || 'Failed to initiate call')
       }
 
-      // Record the first contact time the first time "Call Lead" is pressed
+      addToast({ type: 'success', title: 'Call initiated', message: `Calling ${leadRecord?.name || phoneNumber}...` })
+
       if (!hasFirstContact) {
-        // Persist as ISO string for consistent timestamp storage
         const nowIso = new Date().toISOString()
         const { data: updatedLead, error: updateError } = await supabase
           .from('extracted_leads')
@@ -1065,10 +739,7 @@ export default function Dashboard() {
           .select('*')
           .maybeSingle()
 
-        if (updateError) {
-          console.error('Error recording first contact time:', updateError)
-          setLeadCallError(updateError.message || 'Failed to record first contact time')
-        } else {
+        if (!updateError) {
           const firstContactValue = updatedLead?.first_contact ?? nowIso
           setExtractedLeads((prev) =>
             prev.map((lead) => {
@@ -1077,10 +748,7 @@ export default function Dashboard() {
               return {
                 ...lead,
                 first_contact: nextFirstContact,
-                lead_to_call_minutes: calculateLeadToCallMinutes({
-                  ...lead,
-                  first_contact: nextFirstContact,
-                }),
+                lead_to_call_minutes: calculateLeadToCallMinutes({ ...lead, first_contact: nextFirstContact }),
               }
             })
           )
@@ -1088,7 +756,7 @@ export default function Dashboard() {
       }
     } catch (err) {
       console.error('Error calling lead:', err)
-      setLeadCallError(err instanceof Error ? err.message : 'Failed to initiate call')
+      addToast({ type: 'error', title: 'Call failed', message: err instanceof Error ? err.message : 'Unknown error' })
     } finally {
       setCallingLeadId(null)
     }
@@ -1096,32 +764,22 @@ export default function Dashboard() {
 
   const handleDeleteLead = async (lead: ExtractedLead) => {
     if (!lead.id) return
-    const confirmText = lead.name ? `Remove ${lead.name}? This will delete the lead and any linked bookings.` : 'Remove this lead?'
-    if (!window.confirm(confirmText)) return
-    setDeleteLeadError(null)
+    if (!window.confirm(lead.name ? `Remove ${lead.name}?` : 'Remove this lead?')) return
+    
     setDeletingLeadId(lead.id)
     setExtractedLeads((prev) => prev.filter((l) => l.id !== lead.id))
+    
     try {
       const { error: deleteError } = await supabase.from('extracted_leads').delete().eq('id', lead.id)
       if (deleteError) throw deleteError
+      addToast({ type: 'success', title: 'Lead removed' })
     } catch (err) {
       console.error('Error deleting lead:', err)
-      setDeleteLeadError(err instanceof Error ? err.message : 'Failed to delete lead')
+      addToast({ type: 'error', title: 'Delete failed', message: err instanceof Error ? err.message : 'Unknown error' })
       fetchMetrics()
     } finally {
       setDeletingLeadId(null)
     }
-  }
-
-  const resetManualLeadForm = () => {
-    setManualLead({
-      name: '',
-      phone_number: '',
-      email: '',
-      region_notes: '',
-    })
-    setManualLeadError(null)
-    setShowManualLeadForm(false)
   }
 
   const handleSaveManualLead = async () => {
@@ -1131,28 +789,26 @@ export default function Dashboard() {
     const notes = manualLead.region_notes.trim()
 
     if (!name || !phone || !email) {
-      setManualLeadError('Name, phone, and email are required.')
+      addToast({ type: 'warning', title: 'Missing fields', message: 'Name, phone, and email are required' })
       return
     }
 
     if (!isValidAusPhone(phone)) {
-      setManualLeadError('Phone must be Australian format: +61 followed by 8–9 digits.')
+      addToast({ type: 'warning', title: 'Invalid phone', message: 'Must be +61 followed by 8-9 digits' })
       return
     }
 
     if (!isValidEmail(email)) {
-      setManualLeadError('Email looks invalid. Please use a standard email format.')
+      addToast({ type: 'warning', title: 'Invalid email', message: 'Please enter a valid email address' })
       return
     }
 
     setSavingManualLead(true)
-    setManualLeadError(null)
 
     try {
       const now = new Date().toISOString()
       const emailId = generateUuid()
 
-      // Insert a minimal synthetic email row to satisfy FK and allow traceability
       const { error: emailInsertError } = await supabase
         .from('dialpad_emails')
         .insert({
@@ -1167,11 +823,7 @@ export default function Dashboard() {
           summary: null,
         })
 
-      if (emailInsertError) {
-        console.error('Error inserting synthetic email for manual lead:', emailInsertError)
-        setManualLeadError(emailInsertError.message || 'Failed to create lead email link.')
-        return
-      }
+      if (emailInsertError) throw emailInsertError
 
       const payload = {
         email_id: emailId,
@@ -1190,842 +842,389 @@ export default function Dashboard() {
         .select('*')
         .single()
 
-      if (insertError) {
-        console.error('Error saving manual lead:', insertError)
-        setManualLeadError(insertError.message || 'Failed to save lead. Try again.')
-        return
-      }
+      if (insertError) throw insertError
 
-      const insertedLead: ExtractedLead = {
-        ...payload,
-        ...(data || {}),
-      }
-
-      const leadWithTiming = {
-        ...insertedLead,
-        lead_to_call_minutes: calculateLeadToCallMinutes(insertedLead),
-      }
+      const insertedLead: ExtractedLead = { ...payload, ...(data || {}) }
+      const leadWithTiming = { ...insertedLead, lead_to_call_minutes: calculateLeadToCallMinutes(insertedLead) }
 
       setExtractedLeads((prev) => [leadWithTiming, ...prev])
       playSaveSound()
-      resetManualLeadForm()
+      addToast({ type: 'success', title: 'Lead added', message: `${name} added successfully` })
+      
+      setManualLead({ name: '', phone_number: '', email: '', region_notes: '' })
+      setShowManualLeadForm(false)
     } catch (err) {
       console.error('Error saving manual lead:', err)
-      setManualLeadError(err instanceof Error ? err.message : 'Failed to save lead. Try again.')
+      addToast({ type: 'error', title: 'Save failed', message: err instanceof Error ? err.message : 'Unknown error' })
     } finally {
       setSavingManualLead(false)
     }
   }
 
+  const handleBookingSuccess = () => {
+    setPendingJobWonLead(null)
+    setBookingLead(null)
+    fetchMetrics()
+    setEncouragement({ show: true, message: 'Booking created! Great work.' })
+  }
+
+  const handleBookingSkip = () => {
+    if (pendingJobWonLead) {
+      handleUpdateLeadStatus(pendingJobWonLead.id, 'Job Won', true)
+    }
+    setPendingJobWonLead(null)
+    setBookingLead(null)
+  }
+
+  const handleBookingCancel = () => {
+    setPendingJobWonLead(null)
+    setBookingLead(null)
+  }
+
+  // Calculate progress percentage
+  const dailyGoal = 10 // Won jobs goal
+  const progressPercent = Math.min((metrics.wonJobsSetToday / dailyGoal) * 100, 100)
+
   return (
-    <div className="min-h-screen p-8">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <header className="mb-10">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div className="min-h-screen relative">
+      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        {/* Header Section */}
+        <header className="mb-8">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
             <div>
-              <h1 className="text-4xl font-bold text-white mb-2 flex items-center gap-3">
-                <svg
-                  className="w-10 h-10 text-cyan-400"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={1.5}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"
-                  />
-                </svg>
-                Sydney Premium Cleaning Dashboard
-              </h1>
-              <p className="text-[var(--color-text-muted)]">
-                Real-time communication metrics
+              <div className="flex items-center gap-4 mb-2">
+                <h1 className="text-title text-white">Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}</h1>
+                {streak > 0 && <StreakBadge count={streak} />}
+              </div>
+              <p className="text-caption">
+                {selectedDate 
+                  ? selectedDate.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' })
+                  : "Here's your overview for today"
+                }
               </p>
             </div>
 
-            <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap">
               <DatePicker selectedDate={selectedDate ?? new Date()} onDateChange={setSelectedDate} />
-              <LiveIndicator />
-              <EmailWebhookIndicator status={emailWebhookStatus} />
+              
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--color-surface-elevated)] border border-[var(--glass-border)]">
+                <div className={`w-2 h-2 rounded-full ${
+                  emailWebhookStatus.state === 'connected' ? 'bg-emerald-400' :
+                  emailWebhookStatus.state === 'checking' ? 'bg-amber-400 animate-pulse' :
+                  'bg-red-400'
+                }`} />
+                <span className="text-xs text-[var(--color-text-secondary)]">
+                  {emailWebhookStatus.state === 'connected' ? 'Emails connected' :
+                   emailWebhookStatus.state === 'checking' ? 'Checking...' :
+                   'Emails offline'}
+                </span>
+              </div>
 
-              <button
-                onClick={handleSyncEmails}
-                disabled={isLoading}
-                className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Sync emails from Outlook"
-              >
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                  />
+              <Button onClick={handleSyncEmailsAction} loading={isLoading} variant="secondary" size="sm">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                 </svg>
-                Sync Emails
-              </button>
+                Sync
+              </Button>
 
-              <button
-                onClick={handleRefresh}
-                disabled={isLoading}
-                className="flex items-center gap-2 px-4 py-2.5 bg-[var(--color-surface-light)] hover:bg-[var(--color-surface-lighter)] text-white rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed border border-white/10"
-              >
-                <svg
-                  className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                  />
+              <Button onClick={handleRefresh} loading={isLoading} variant="ghost" size="sm">
+                <svg className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
-                Refresh
-              </button>
+              </Button>
             </div>
-          </div>
-
-          {/* Last updated timestamp */}
-          <div className="mt-4 text-sm text-[var(--color-text-muted)]">
-            Last updated:{' '}
-            <span className="font-mono text-cyan-400">
-              {lastUpdated.toLocaleTimeString('en-US', {
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-              })}
-            </span>
           </div>
         </header>
 
-        {/* Error state */}
+        {/* Error Banner */}
         {error && (
-          <div className="mb-8 p-4 glass-card rounded-xl border border-red-500/20 bg-red-500/10">
+          <div className="mb-6 p-4 rounded-xl bg-[var(--color-error-muted)] border border-red-500/20">
             <div className="flex items-center gap-3">
-              <svg
-                className="w-6 h-6 text-red-400"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                />
+              <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
               <div>
-                <p className="text-red-400 font-medium">Error loading metrics</p>
-                <p className="text-red-300/70 text-sm">{error}</p>
+                <p className="text-sm font-medium text-red-400">Error loading data</p>
+                <p className="text-xs text-red-300/70">{error}</p>
               </div>
             </div>
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start mb-8">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">Key Activity</h2>
-              <span className="text-xs text-[var(--color-text-muted)]">Compact view</span>
-            </div>
+        {/* Main Grid */}
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
+          
+          {/* Left Column - Progress & Key Metrics */}
+          <div className="xl:col-span-2 space-y-6">
+            
+            {/* Daily Progress Card */}
+            <GlassCard className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-heading text-white">Today's Progress</h2>
+                  <p className="text-caption">{metrics.wonJobsSetToday} of {dailyGoal} jobs won today</p>
+                </div>
+                <ProgressRing progress={progressPercent} size={64}>
+                  <span className="text-sm font-bold text-white">{metrics.wonJobsSetToday}</span>
+                </ProgressRing>
+              </div>
+              
+              {/* Quick Stats Row */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3 rounded-lg bg-[var(--color-surface)] border border-[var(--glass-border)]">
+                  <p className="text-micro mb-1">Calls Made</p>
+                  <p className="text-xl font-bold text-white">{isLoading ? '—' : metrics.uniqueCalls}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-[var(--color-surface)] border border-[var(--glass-border)]">
+                  <p className="text-micro mb-1">Meaningful</p>
+                  <p className="text-xl font-bold text-[var(--color-accent)]">{isLoading ? '—' : metrics.callsOver30s}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-[var(--color-surface)] border border-[var(--glass-border)]">
+                  <p className="text-micro mb-1">Messages</p>
+                  <p className="text-xl font-bold text-white">{isLoading ? '—' : metrics.smsSent + metrics.emailsSent}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-[var(--color-surface)] border border-[var(--glass-border)]">
+                  <p className="text-micro mb-1">New Leads</p>
+                  <p className="text-xl font-bold text-amber-400">{isLoading ? '—' : metrics.leads}</p>
+                </div>
+              </div>
+            </GlassCard>
 
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {/* Unique Calls */}
-              <MetricCard
-                title={selectedDate ? "Unique Calls" : "Unique Calls Today"}
-                value={metrics.uniqueCalls}
-                color="cyan"
-                isLoading={isLoading}
-                icon={
-                  <svg
-                    className="w-6 h-6 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
-                    />
-                  </svg>
-                }
-              />
-
-              {/* Outbound Calls */}
-              <MetricCard
-                title="Outbound Calls"
+            {/* Metrics Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+              <StatCard
+                label="Outbound"
                 value={metrics.outboundCalls}
-                color="orange"
-                isLoading={isLoading}
-                icon={
-                  <svg
-                    className="w-6 h-6 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M16 3h5m0 0v5m0-5l-6 6M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z"
-                    />
-                  </svg>
-                }
+                loading={isLoading}
+                accentColor="#f97316"
+                icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 3h5m0 0v5m0-5l-6 6" /></svg>}
               />
-
-              {/* Inbound Calls */}
-              <MetricCard
-                title="Inbound Calls"
+              <StatCard
+                label="Inbound"
                 value={metrics.inboundCalls}
-                color="green"
-                isLoading={isLoading}
-                icon={
-                  <svg
-                    className="w-6 h-6 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
-                    />
-                  </svg>
-                }
+                loading={isLoading}
+                accentColor="#22c55e"
+                icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>}
               />
-
-              {/* Calls >30s */}
-              <MetricCard
-                title="Calls >30 Seconds"
-                value={metrics.callsOver30s}
-                color="emerald"
-                isLoading={isLoading}
-                icon={
-                  <svg
-                    className="w-6 h-6 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                }
-              />
-
-              {/* SMS Sent */}
-              <MetricCard
-                title="SMS Sent"
+              <StatCard
+                label="SMS Sent"
                 value={metrics.smsSent}
-                color="violet"
-                isLoading={isLoading}
-                icon={
-                  <svg
-                    className="w-6 h-6 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                    />
-                  </svg>
-                }
+                loading={isLoading}
+                accentColor="#a855f7"
+                icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>}
               />
-
-              {/* SMS Received */}
-              <MetricCard
-                title="SMS Received"
-                value={metrics.smsReceived}
-                color="violet"
-                isLoading={isLoading}
-                icon={
-                  <svg
-                    className="w-6 h-6 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                    />
-                  </svg>
-                }
-              />
-
-              {/* Emails Sent */}
-              <MetricCard
-                title={selectedDate ? "Emails Sent" : "Emails Sent Today"}
+              <StatCard
+                label="Emails"
                 value={metrics.emailsSent}
-                color="blue"
-                isLoading={isLoading}
-                icon={
-                  <svg
-                    className="w-6 h-6 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                    />
-                  </svg>
-                }
+                loading={isLoading}
+                accentColor="#3b82f6"
+                icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>}
               />
-
-              {/* Emails Received */}
-              <MetricCard
-                title={selectedDate ? "Emails Received" : "Emails Received Today"}
-                value={metrics.emailsReceived}
-                color="blue"
-                isLoading={isLoading}
-                icon={
-                  <svg
-                    className="w-6 h-6 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                    />
-                  </svg>
-                }
-              />
-
-              {/* Leads */}
-              <MetricCard
-                title={selectedDate ? "Leads" : "Leads Today"}
-                value={metrics.leads}
-                color="emerald"
-                isLoading={isLoading}
-                icon={
-                  <svg
-                    className="w-6 h-6 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                }
-              />
-              {/* Won Jobs */}
-              <MetricCard
-                title={`Total Won Jobs (Set: ${metrics.wonJobsSetToday})`}
-                value={metrics.wonJobs}
-                color="green"
-                isLoading={isLoading}
-                icon={
-                  <svg
-                    className="w-6 h-6 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M11 5H7a2 2 0 00-2 2v3a6 6 0 006 6 6 6 0 006-6V7a2 2 0 00-2-2h-4m0 0V3m0 2h2m-2 0H9m8 10a4 4 0 01-4 4H9a4 4 0 01-4-4"
-                    />
-                  </svg>
-                }
-              />
-              {/* Communications to Won Jobs Ratio */}
-              <MetricCard
-                title="Comm Score → Won Ratio"
-                value={metrics.commsToWonJobRatio}
-                color="cyan"
-                isLoading={isLoading}
-                icon={
-                  <svg
-                    className="w-6 h-6 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M7 8h10M7 12h6m-6 4h10M5 4h14a2 2 0 012 2v12a2 2 0 01-2 2H7l-4 4V6a2 2 0 012-2z"
-                    />
-                  </svg>
-                }
-              />
-              {/* Lead to Call Avg per Won Job */}
-              <MetricCard
-                title="Lead → Call Avg / Won Job"
-                value={metrics.leadToCallAvgPerWonJob}
-                color="orange"
-                isLoading={isLoading}
-                icon={
-                  <svg
-                    className="w-6 h-6 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M12 8v4l3 3m4-3a7 7 0 11-14 0 7 7 0 0114 0z"
-                    />
-                  </svg>
-                }
-              />
-              {/* Leads to Won Job Ratio */}
-              <MetricCard
-                title="Leads → Won Job Ratio"
-                value={metrics.leadsToWonJobRatio}
-                color="violet"
-                isLoading={isLoading}
-                icon={
-                  <svg
-                    className="w-6 h-6 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M13 7h8m0 0v8m0-8L13 15M3 17l6-6 4 4 7-7"
-                    />
-                  </svg>
-                }
-              />
-              <MetricCard
-                title="Quotes (Unique Leads)"
+              <StatCard
+                label="Quotes"
                 value={metrics.quotesForUniqueLeads}
-                color="blue"
-                isLoading={isLoading}
-                icon={
-                  <svg
-                    className="w-6 h-6 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v8m-4-4h8M4 6h16v12H4z" />
-                  </svg>
-                }
+                loading={isLoading}
+                accentColor="#06b6d4"
+                icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
               />
-              <MetricCard
-                title="Lead → Call Avg (min)"
-                value={metrics.averageLeadToCallMinutes}
-                color="emerald"
-                isLoading={isLoading}
-                icon={
-                  <svg
-                    className="w-6 h-6 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M12 8v4l3 3m5-3a8 8 0 11-16 0 8 8 0 0116 0z"
-                    />
-                  </svg>
-                }
+              <StatCard
+                label="Won Jobs"
+                value={metrics.wonJobs}
+                loading={isLoading}
+                accentColor="#10b981"
+                icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" /></svg>}
               />
-              <MetricCard
-                title="Lead → Call Median (min)"
-                value={metrics.medianLeadToCallMinutes}
-                color="emerald"
-                isLoading={isLoading}
-                icon={
-                  <svg
-                    className="w-6 h-6 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M12 6v6l4 2m-9.97 2.757a9 9 0 1116.97-5.757"
-                    />
-                  </svg>
-                }
+              <StatCard
+                label="Avg Response"
+                value={`${metrics.averageLeadToCallMinutes}m`}
+                loading={isLoading}
+                accentColor="#eab308"
+                icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+              />
+              <StatCard
+                label="Conversion"
+                value={metrics.leadsToWonJobRatio > 0 ? `${(100 / metrics.leadsToWonJobRatio).toFixed(0)}%` : '—'}
+                loading={isLoading}
+                accentColor="#ec4899"
+                icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>}
               />
             </div>
           </div>
 
-          <div
-            className="glass-card rounded-xl overflow-hidden flex flex-col h-full"
-            style={{ maxHeight: '62vh' }}
-          >
-            <div className="p-3 border-b border-white/10 flex flex-col gap-2">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <svg
-                    className="w-5 h-5 text-emerald-400"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <div>
-                    <h2 className="text-base font-semibold text-white">Extracted Lead Information</h2>
-                    <p className="text-[11px] text-[var(--color-text-muted)]">Compact, scrollable lead info with quick status updates.</p>
-                  </div>
+          {/* Right Column - Leads */}
+          <div className="xl:col-span-1">
+            <GlassCard className="h-full max-h-[600px] flex flex-col">
+              <div className="p-4 border-b border-[var(--glass-border)] flex items-center justify-between">
+                <div>
+                  <h2 className="text-heading text-white">Today's Leads</h2>
+                  <p className="text-caption">{extractedLeads.length} leads to work</p>
                 </div>
-                <button
-                  onClick={() => {
-                    setShowManualLeadForm(true)
-                    setManualLeadError(null)
-                    setManualLead({
-                      name: '',
-                      phone_number: '',
-                      email: '',
-                      region_notes: '',
-                    })
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-700 transition-colors"
+                <Button 
+                  onClick={() => setShowManualLeadForm(true)} 
+                  variant="primary" 
+                  size="sm"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                   </svg>
-                  Add lead
-                </button>
+                  Add
+                </Button>
               </div>
-              <span className="text-[10px] text-[var(--color-text-muted)]">Status changes write back to the leads table.</span>
-            </div>
 
-            {leadStatusError && (
-              <div className="mx-4 mt-3 p-2 bg-red-500/10 border border-red-500/20 rounded text-red-400 text-xs">
-                {leadStatusError}
-              </div>
-            )}
-            {leadCallError && (
-              <div className="mx-4 mt-2 p-2 bg-orange-500/10 border border-orange-500/20 rounded text-orange-300 text-xs">
-                {leadCallError}
-              </div>
-            )}
-            {deleteLeadError && (
-              <div className="mx-4 mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded text-red-300 text-xs">
-                {deleteLeadError}
-              </div>
-            )}
-
-            <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-              {showManualLeadForm && (
-                <div className="p-3 rounded-lg shadow-sm flex flex-col gap-2 border border-emerald-500/40 bg-[var(--color-surface)] new-lead-border">
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider">New lead from phone</div>
-                    <button
-                      onClick={resetManualLeadForm}
-                      className="text-[10px] text-[var(--color-text-muted)] hover:text-white"
-                      type="button"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <label className="text-[10px] uppercase text-[var(--color-text-muted)]">Name</label>
-                      <input
-                        value={manualLead.name}
-                        onChange={(e) => setManualLead((prev) => ({ ...prev, name: e.target.value }))}
-                        className="w-full rounded-lg bg-[var(--color-surface-light)] border border-white/10 px-2 py-1.5 text-sm text-white"
-                        placeholder="Customer name"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] uppercase text-[var(--color-text-muted)]">Phone (+61…)</label>
-                      <input
-                        value={manualLead.phone_number}
-                        onChange={(e) => setManualLead((prev) => ({ ...prev, phone_number: e.target.value }))}
-                        className="w-full rounded-lg bg-[var(--color-surface-light)] border border-white/10 px-2 py-1.5 text-sm text-white"
-                        placeholder="+614xxxxxxxx"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] uppercase text-[var(--color-text-muted)]">Email</label>
-                      <input
-                        type="email"
-                        value={manualLead.email}
-                        onChange={(e) => setManualLead((prev) => ({ ...prev, email: e.target.value }))}
-                        className="w-full rounded-lg bg-[var(--color-surface-light)] border border-white/10 px-2 py-1.5 text-sm text-white"
-                        placeholder="name@example.com"
-                      />
-                    </div>
-                    <div className="space-y-1 sm:col-span-2">
-                      <label className="text-[10px] uppercase text-[var(--color-text-muted)]">Region / Notes</label>
-                      <textarea
-                        rows={2}
-                        value={manualLead.region_notes}
-                        onChange={(e) => setManualLead((prev) => ({ ...prev, region_notes: e.target.value }))}
-                        className="w-full rounded-lg bg-[var(--color-surface-light)] border border-white/10 px-2 py-1.5 text-sm text-white"
-                        placeholder="Suburb or quick notes from the call"
-                      />
-                    </div>
-                  </div>
-
-                  {manualLeadError && (
-                    <div className="p-2 bg-red-500/10 border border-red-500/20 rounded text-red-300 text-xs">{manualLeadError}</div>
-                  )}
-
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      onClick={handleSaveManualLead}
-                      disabled={savingManualLead}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-700 transition-colors disabled:opacity-60"
-                      type="button"
-                    >
-                      {savingManualLead ? (
-                        <svg className="w-4 h-4 animate-spin text-white" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                      ) : (
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {/* Manual Lead Form */}
+                {showManualLeadForm && (
+                  <div className="p-4 rounded-xl bg-[var(--color-accent-muted)] border border-[var(--color-accent)]/30 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-micro">New Lead</span>
+                      <button onClick={() => setShowManualLeadForm(false)} className="text-[var(--color-text-muted)] hover:text-white">
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                         </svg>
-                      )}
-                      {savingManualLead ? 'Saving…' : 'Save lead'}
-                    </button>
-                    <span className="text-[10px] text-[var(--color-text-muted)]">
-                      Must be +61 with 8–9 digits; email must be valid.
-                    </span>
+                      </button>
+                    </div>
+                    <input
+                      value={manualLead.name}
+                      onChange={(e) => setManualLead(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder="Name"
+                      className="input text-sm"
+                    />
+                    <input
+                      value={manualLead.phone_number}
+                      onChange={(e) => setManualLead(prev => ({ ...prev, phone_number: e.target.value }))}
+                      placeholder="+61..."
+                      className="input text-sm"
+                    />
+                    <input
+                      value={manualLead.email}
+                      onChange={(e) => setManualLead(prev => ({ ...prev, email: e.target.value }))}
+                      placeholder="Email"
+                      className="input text-sm"
+                    />
+                    <textarea
+                      value={manualLead.region_notes}
+                      onChange={(e) => setManualLead(prev => ({ ...prev, region_notes: e.target.value }))}
+                      placeholder="Notes..."
+                      rows={2}
+                      className="input text-sm resize-none"
+                    />
+                    <Button onClick={handleSaveManualLead} loading={savingManualLead} variant="primary" className="w-full">
+                      Save Lead
+                    </Button>
                   </div>
-                </div>
-              )}
-              {extractedLeads.length > 0 ? (
-                extractedLeads.map((lead) => {
-                  const statusStyle = getStatusStyle(lead.status)
-                  const newLead = isNewLead(lead)
-                  const isPaid = lead.status?.toLowerCase() === 'paid'
+                )}
 
-                  return (
-                    <div
-                      key={lead.id}
-                      className={`relative p-3 rounded-lg shadow-sm flex flex-col gap-2 border ${statusStyle.border} ${statusStyle.bg} ${
-                        newLead ? 'new-lead-border' : ''
-                      } ${isPaid ? 'opacity-85' : ''}`}
-                    >
-                      {isPaid && (
-                        <span className="absolute top-2 right-2 inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/25 text-emerald-100 border border-emerald-400/40">
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          Paid
-                        </span>
-                      )}
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-1 text-xs">
-                          {lead.name && (
-                            <div>
-                              <span className="text-[var(--color-text-muted)] uppercase tracking-wider text-[10px]">Name</span>
-                              <p className="text-white font-medium mt-0.5">{lead.name}</p>
-                            </div>
-                          )}
-                          {lead.phone_number && (
-                            <div>
-                              <span className="text-[var(--color-text-muted)] uppercase tracking-wider text-[10px]">Phone</span>
-                              <p className="text-white font-medium mt-0.5">{lead.phone_number}</p>
-                            </div>
-                          )}
-                          {lead.email && (
-                            <div>
-                              <span className="text-[var(--color-text-muted)] uppercase tracking-wider text-[10px]">Email</span>
-                              <p className="text-white font-medium mt-0.5 truncate">{lead.email}</p>
-                            </div>
-                          )}
-                          {lead.region_notes && (
-                            <div>
-                              <span className="text-[var(--color-text-muted)] uppercase tracking-wider text-[10px]">Region/Notes</span>
-                              <p className="text-white text-sm mt-0.5">{lead.region_notes}</p>
-                            </div>
-                          )}
-                          {(lead.last_text_date || lead.last_text_body) && (
-                            <div>
-                              <span className="text-[var(--color-text-muted)] uppercase tracking-wider text-[10px]">Last Text</span>
-                              {getLastTextDate(lead) && (
-                                <p className="text-white font-medium mt-0.5">
-                                  {getLastTextDate(lead)?.toLocaleString()}
-                                </p>
-                              )}
-                              {lead.last_text_body && (
-                                <p
-                                  className="text-[var(--color-text-muted)] text-xs mt-0.5 truncate"
-                                  title={lead.last_text_body}
-                                >
-                                  “{lead.last_text_body}”
-                                </p>
-                              )}
-                            </div>
-                          )}
-                          <div className="text-[var(--color-text-muted)] text-[10px] pt-1 border-t border-white/5 mt-1">
-                            {lead.email_created_at
-                              ? new Date(lead.email_created_at).toLocaleString()
-                              : new Date(lead.extracted_at || lead.created_at || '').toLocaleString()}
+                {/* Lead Cards */}
+                {extractedLeads.length === 0 && !showManualLeadForm ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="w-12 h-12 rounded-full bg-[var(--color-surface)] flex items-center justify-center mb-3">
+                      <svg className="w-6 h-6 text-[var(--color-text-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                      </svg>
+                    </div>
+                    <p className="text-sm text-white mb-1">No leads today</p>
+                    <p className="text-xs text-[var(--color-text-muted)]">New leads will appear here</p>
+                  </div>
+                ) : (
+                  extractedLeads.map((lead) => {
+                    const isNew = isNewLead(lead)
+                    
+                    return (
+                      <div
+                        key={lead.id}
+                        className={`lead-card ${isNew ? 'lead-card-new' : ''}`}
+                      >
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-white truncate">{lead.name || 'Unknown'}</p>
+                            <p className="text-xs text-[var(--color-text-muted)] truncate">{lead.phone_number || lead.email}</p>
                           </div>
-                          <div className="flex items-center gap-2 text-[10px] pt-1">
-                            <span className="text-[var(--color-text-muted)] uppercase tracking-wider">Lead → Call</span>
-                            <span className={lead.first_contact ? 'text-emerald-200 font-semibold' : 'text-amber-300 font-semibold'}>
-                              {formatLeadToCallText(lead.lead_to_call_minutes)}
-                            </span>
-                            {getFirstContactDate(lead) && (
-                              <span className="text-[var(--color-text-muted)]">
-                                at {getFirstContactDate(lead)?.toLocaleTimeString()}
-                              </span>
-                            )}
-                            {newLead && (
-                              <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-100 font-semibold">
-                                New
-                              </span>
-                            )}
+                          <div className="flex items-center gap-2">
+                            {isNew && <Badge variant="warning" dot>New</Badge>}
+                            {lead.status && <Badge variant={getStatusBadgeVariant(lead.status)}>{lead.status}</Badge>}
                           </div>
                         </div>
-                      <div className="flex flex-col items-end gap-1">
-                        {lead.status && (
-                          <span className={`px-2 py-1 text-[11px] rounded-full font-medium ${statusStyle.pillBg} ${statusStyle.pillText}`}>
-                            {lead.status}
-                          </span>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteLead(lead)}
-                          disabled={deletingLeadId === lead.id}
-                          className="w-6 h-6 rounded-full bg-red-500/15 hover:bg-red-500/25 text-red-200 text-[11px] flex items-center justify-center disabled:opacity-50"
-                          title="Remove lead"
-                        >
-                          x
-                        </button>
-                      </div>
-                      </div>
 
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider">Status</span>
-                        <select
-                          value={lead.status || ''}
-                          onChange={(e) => {
-                            const nextStatus = e.target.value || null
-                            handleUpdateLeadStatus(lead.id, nextStatus)
-                          }}
-                          disabled={savingStatusId === lead.id}
-                          className="bg-[var(--color-surface-light)] text-white text-xs rounded-lg px-2 py-1 border border-white/10 focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                        >
-                          <option value="">Select status</option>
-                          {LEAD_STATUS_OPTIONS.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                        {savingStatusId === lead.id && (
-                          <svg className="w-4 h-4 animate-spin text-emerald-300" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                          </svg>
+                        {lead.region_notes && (
+                          <p className="text-xs text-[var(--color-text-secondary)] mb-3 truncate-2">{lead.region_notes}</p>
                         )}
-                        <SmsLead
-                          leadId={lead.id}
-                          leadName={lead.name}
-                          phoneNumber={lead.phone_number}
-                          dialpadToken={dialpadToken}
-                          dialpadUserId={dialpadUserId}
-                          onSent={({ sentAt, message }) => {
-                            setExtractedLeads((prev) =>
-                              prev.map((l) =>
-                                l.id === lead.id ? { ...l, last_text_date: sentAt, last_text_body: message } : l
-                              )
-                            )
-                          }}
-                        />
-                        <button
-                          onClick={() => setQuoteLead(lead)}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+
+                        <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] mb-3">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                           </svg>
-                          Create Quote
-                        </button>
-                        <button
-                          onClick={() => handleCallLead(lead.id, lead.phone_number)}
-                          disabled={callingLeadId === lead.id}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-700 transition-colors disabled:opacity-60"
-                        >
-                          {callingLeadId === lead.id ? (
-                            <svg className="w-4 h-4 animate-spin text-white" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          <span className={lead.first_contact ? 'text-emerald-400' : 'text-amber-400'}>
+                            {formatLeadToCallText(lead.lead_to_call_minutes)}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <select
+                            value={lead.status || ''}
+                            onChange={(e) => handleUpdateLeadStatus(lead.id, e.target.value || null)}
+                            disabled={savingStatusId === lead.id}
+                            className="flex-1 min-w-[120px] px-2 py-1.5 rounded-lg bg-[var(--color-surface)] border border-[var(--glass-border)] text-xs text-white focus:outline-none focus:border-[var(--color-accent)]"
+                          >
+                            <option value="">Set status...</option>
+                            {LEAD_STATUS_OPTIONS.map((option) => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                          </select>
+                          
+                          <Button
+                            onClick={() => handleCallLead(lead.id, lead.phone_number)}
+                            loading={callingLeadId === lead.id}
+                            variant="primary"
+                            size="sm"
+                            disabled={!lead.phone_number}
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                             </svg>
-                          ) : (
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.05 5.05a7 7 0 010 9.9m-2.83-7.07a3 3 0 010 4.24m-2.12 1.41a10.97 10.97 0 004.95 4.95l1.7-1.7a1 1 0 011.01-.24c1.12.37 2.33.57 3.57.57a1 1 0 011 1V20a1 1 0 01-1 1C10.611 21 3 13.389 3 4a1 1 0 011-1h3.83a1 1 0 011 1c0 1.24.2 2.45.57 3.57a1 1 0 01-.24 1.01l-1.7 1.7z" />
+                          </Button>
+
+                          <Button onClick={() => setQuoteLead(lead)} variant="secondary" size="sm">
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                             </svg>
-                          )}
-                          Call Lead
-                        </button>
+                          </Button>
+
+                          <SmsLead
+                            leadId={lead.id}
+                            leadName={lead.name}
+                            phoneNumber={lead.phone_number}
+                            dialpadToken={dialpadToken}
+                            dialpadUserId={dialpadUserId}
+                            onSent={({ sentAt, message }) => {
+                              setExtractedLeads((prev) =>
+                                prev.map((l) => l.id === lead.id ? { ...l, last_text_date: sentAt, last_text_body: message } : l)
+                              )
+                              addToast({ type: 'success', title: 'SMS sent', message: `Message sent to ${lead.name || 'lead'}` })
+                            }}
+                          />
+
+                          <button
+                            onClick={() => handleDeleteLead(lead)}
+                            disabled={deletingLeadId === lead.id}
+                            className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  )
-                })
-              ) : (
-                <div className="flex items-center justify-center h-full text-[var(--color-text-muted)] text-sm">
-                  No extracted leads yet. Leads will appear here automatically when emails are synced.
-                </div>
-              )}
-            </div>
+                    )
+                  })
+                )}
+              </div>
+            </GlassCard>
           </div>
         </div>
 
-
         {/* Charts Section */}
-        <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Day Comparison Chart */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           <DayComparisonChart
             calls={allCalls}
             sms={allSms}
@@ -2034,8 +1233,6 @@ export default function Dashboard() {
             isLoading={isLoading}
             onDateChange={setSelectedDate}
           />
-          
-          {/* Hourly Activity */}
           <HourlyActivity
             calls={allCalls}
             selectedDate={selectedDate}
@@ -2051,35 +1248,27 @@ export default function Dashboard() {
         <CommunicationsLog selectedDate={selectedDate} />
 
         {/* Footer */}
-        <footer className="mt-12 text-center text-[var(--color-text-muted)] text-sm">
-          <p>
-            Powered by{' '}
-            <a
-              href="https://supabase.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-cyan-400 hover:text-cyan-300 transition-colors"
-            >
-              Supabase
-            </a>{' '}
-            Real-time
+        <footer className="mt-16 text-center py-8 border-t border-[var(--glass-border)]">
+          <p className="text-xs text-[var(--color-text-muted)]">
+            Operations Hub · Powered by <a href="https://supabase.com" target="_blank" rel="noopener noreferrer" className="text-[var(--color-accent)] hover:underline">Supabase</a> Real-time
           </p>
         </footer>
       </div>
 
+      {/* Quote Modal */}
       {quoteLead && (
         <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[10000] p-4"
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[500] p-4"
           onClick={() => setQuoteLead(null)}
         >
           <div
-            className="bg-[var(--color-surface)] border border-white/10 rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto shadow-2xl"
+            className="glass-elevated w-full max-w-5xl max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between p-4 border-b border-white/10">
+            <div className="flex items-center justify-between p-4 border-b border-[var(--glass-border)]">
               <div>
-                <p className="text-xs uppercase text-[var(--color-text-muted)] tracking-wider">Create Quote</p>
-                <h3 className="text-white font-semibold">
+                <p className="text-micro">Create Quote</p>
+                <h3 className="text-heading text-white">
                   {quoteLead.name || 'Lead'} · {quoteLead.email || quoteLead.phone_number || ''}
                 </h3>
               </div>
@@ -2099,7 +1288,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Booking Modal - shown when status changes to "Job Won" */}
+      {/* Booking Modals */}
       {pendingJobWonLead && (
         <BookingModal
           lead={pendingJobWonLead}
@@ -2109,7 +1298,6 @@ export default function Dashboard() {
         />
       )}
 
-      {/* Manual Booking Modal */}
       {bookingLead && (
         <BookingModal
           lead={bookingLead}
@@ -2121,7 +1309,13 @@ export default function Dashboard() {
           onSkip={() => setBookingLead(null)}
         />
       )}
+
+      {/* Encouragement Message */}
+      <Encouragement
+        message={encouragement.message}
+        show={encouragement.show}
+        onHide={() => setEncouragement({ show: false, message: '' })}
+      />
     </div>
   )
 }
-

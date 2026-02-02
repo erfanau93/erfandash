@@ -14,6 +14,7 @@ import {
 } from 'date-fns'
 import { supabase } from '../lib/supabase'
 import { playSaveSound } from '../lib/sounds'
+import { GlassCard, Button, Badge } from './ui'
 
 interface BookingOccurrence {
   id: string
@@ -436,21 +437,33 @@ export default function CleanersPayout() {
   }
 
   return (
-    <div className="min-h-screen p-6 md:p-8">
+    <div className="min-h-screen p-4 md:p-6 lg:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-white">Cleaners Payout</h1>
-            <p className="text-[var(--color-text-muted)] mt-1">
+            <h1 className="text-3xl font-bold text-white flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500/30 to-teal-500/30 border border-emerald-400/30 flex items-center justify-center backdrop-blur-sm">
+                <svg className="w-6 h-6 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
+                </svg>
+              </div>
+              Cleaners Payout
+            </h1>
+            <p className="text-[var(--color-text-muted)] mt-2 text-sm">
               Track cleaner payments, margins, and payouts for completed jobs.
             </p>
           </div>
-          <button
+          <Button
             onClick={fetchData}
-            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500/40"
+            variant="primary"
+            icon={
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            }
           >
             Refresh
-          </button>
+          </Button>
         </header>
 
         {/* Period selector */}
@@ -621,28 +634,65 @@ export default function CleanersPayout() {
         </div>
 
         {/* Summary cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <div className="glass-card rounded-xl p-4 border border-white/10">
-            <p className="text-sm text-[var(--color-text-muted)]">Total Revenue</p>
-            <p className="text-3xl font-bold text-white">{formatCurrency(totals.total)}</p>
-          </div>
-          <div className="glass-card rounded-xl p-4 border border-white/10">
-            <p className="text-sm text-[var(--color-text-muted)]">Total Payouts</p>
-            <p className="text-3xl font-bold text-white">{formatCurrency(totals.totalPayouts)}</p>
-          </div>
-          <div className="glass-card rounded-xl p-4 border border-white/10">
-            <p className="text-sm text-[var(--color-text-muted)]">Total Profit</p>
-            <p className="text-3xl font-bold text-emerald-400">{formatCurrency(totals.totalProfit)}</p>
-            <p className="text-xs text-[var(--color-text-muted)] mt-1">
-              Margin: {totals.margin.toFixed(1)}%
-            </p>
-          </div>
-          <div className="glass-card rounded-xl p-4 border border-white/10">
-            <p className="text-sm text-[var(--color-text-muted)]">Status</p>
-            <p className="text-lg font-semibold text-white">
-              {totals.paidCount} paid / {totals.unpaidCount} unpaid
-            </p>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <GlassCard className="p-4 group hover:scale-[1.02] transition-all duration-300">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm text-[var(--color-text-muted)]">Total Revenue</p>
+                <p className="text-3xl font-bold text-white tabular-nums group-hover:scale-105 transition-transform origin-left">{formatCurrency(totals.total)}</p>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center">
+                <svg className="w-5 h-5 text-cyan-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+            </div>
+          </GlassCard>
+          <GlassCard className="p-4 group hover:scale-[1.02] transition-all duration-300">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm text-[var(--color-text-muted)]">Total Payouts</p>
+                <p className="text-3xl font-bold text-white tabular-nums group-hover:scale-105 transition-transform origin-left">{formatCurrency(totals.totalPayouts)}</p>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center">
+                <svg className="w-5 h-5 text-amber-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+              </div>
+            </div>
+          </GlassCard>
+          <GlassCard className="p-4 group hover:scale-[1.02] transition-all duration-300 border-emerald-500/20">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm text-[var(--color-text-muted)]">Total Profit</p>
+                <p className="text-3xl font-bold text-emerald-400 tabular-nums group-hover:scale-105 transition-transform origin-left">{formatCurrency(totals.totalProfit)}</p>
+                <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                  Margin: {totals.margin.toFixed(1)}%
+                </p>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center">
+                <svg className="w-5 h-5 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                </svg>
+              </div>
+            </div>
+          </GlassCard>
+          <GlassCard className="p-4 group hover:scale-[1.02] transition-all duration-300">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm text-[var(--color-text-muted)]">Status</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <Badge variant="success" size="sm">{totals.paidCount} paid</Badge>
+                  <Badge variant="warning" size="sm">{totals.unpaidCount} unpaid</Badge>
+                </div>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center">
+                <svg className="w-5 h-5 text-violet-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+            </div>
+          </GlassCard>
         </div>
 
         {/* Filters */}
@@ -693,27 +743,37 @@ export default function CleanersPayout() {
 
         {/* Cleaner-specific summary */}
         {selectedCleanerId && filteredRows.length > 0 && (
-          <div className="glass-card rounded-xl p-4 border border-cyan-500/30 bg-cyan-500/5">
-            <p className="text-sm text-[var(--color-text-muted)] mb-2">
-              Summary for {filteredRows[0]?.cleaner?.full_name || 'Selected Cleaner'}
-            </p>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <p className="text-xs text-[var(--color-text-muted)]">Total Payout</p>
-                <p className="text-2xl font-bold text-white">{formatCurrency(totals.totalPayouts)}</p>
+          <GlassCard className="p-5 border-cyan-500/30 bg-gradient-to-r from-cyan-500/10 to-blue-500/10">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center">
+                <svg className="w-5 h-5 text-cyan-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
               </div>
               <div>
+                <p className="text-white font-semibold">{filteredRows[0]?.cleaner?.full_name || 'Selected Cleaner'}</p>
+                <p className="text-xs text-[var(--color-text-muted)]">Individual payout summary</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="p-3 rounded-xl bg-white/5 border border-white/10">
+                <p className="text-xs text-[var(--color-text-muted)]">Total Payout</p>
+                <p className="text-2xl font-bold text-white tabular-nums">{formatCurrency(totals.totalPayouts)}</p>
+              </div>
+              <div className="p-3 rounded-xl bg-white/5 border border-white/10">
                 <p className="text-xs text-[var(--color-text-muted)]">Jobs Count</p>
                 <p className="text-2xl font-bold text-white">{filteredRows.length}</p>
               </div>
-              <div>
-                <p className="text-xs text-[var(--color-text-muted)]">Paid/Unpaid</p>
-                <p className="text-lg font-semibold text-white">
-                  {totals.paidCount} / {totals.unpaidCount}
-                </p>
+              <div className="p-3 rounded-xl bg-white/5 border border-white/10">
+                <p className="text-xs text-[var(--color-text-muted)]">Status</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <Badge variant="success" size="sm">{totals.paidCount}</Badge>
+                  <span className="text-[var(--color-text-muted)]">/</span>
+                  <Badge variant="warning" size="sm">{totals.unpaidCount}</Badge>
+                </div>
               </div>
             </div>
-          </div>
+          </GlassCard>
         )}
 
         {isLoading ? (

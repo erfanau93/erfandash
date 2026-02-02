@@ -1,6 +1,14 @@
+/**
+ * Cleaners - Apple VisionOS Team Management
+ * 
+ * A beautiful interface for managing your cleaning team.
+ * Glass cards, availability matrix, and smooth interactions.
+ */
+
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { playSaveSound } from '../lib/sounds'
+import { GlassCard, Button, Badge, useToast, Input } from './ui'
 
 type AvailabilityBucket = 'Morning' | 'Afternoon' | 'Evening' | 'Night'
 type DayName = 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday'
@@ -35,26 +43,15 @@ type Cleaner = {
 const DAYS: DayName[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 const BUCKETS: AvailabilityBucket[] = ['Morning', 'Afternoon', 'Evening', 'Night']
 
-const MAPBOX_TOKEN =
-  import.meta.env.VITE_MAPBOX_TOKEN ||
-  import.meta.env.VITE_MAPBOX_API_KEY ||
-  import.meta.env.VITE_MAPBOX ||
-  ''
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || import.meta.env.VITE_MAPBOX_API_KEY || import.meta.env.VITE_MAPBOX || ''
 
 async function mapboxSuggest(query: string) {
   if (!MAPBOX_TOKEN) return []
-  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
-    query
-  )}.json?access_token=${MAPBOX_TOKEN}&autocomplete=true&limit=5&country=AU`
+  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${MAPBOX_TOKEN}&autocomplete=true&limit=5&country=AU`
   const res = await fetch(url)
   const data = await res.json().catch(() => ({}))
   const features = Array.isArray(data?.features) ? data.features : []
-  return features
-    .map((f: any) => ({
-      place_name: f?.place_name as string,
-      center: f?.center as [number, number] | undefined, // [lng, lat]
-    }))
-    .filter((x: any) => typeof x.place_name === 'string' && x.place_name.length > 0)
+  return features.map((f: any) => ({ place_name: f?.place_name as string, center: f?.center as [number, number] | undefined })).filter((x: any) => typeof x.place_name === 'string' && x.place_name.length > 0)
 }
 
 function defaultAvailability() {
@@ -66,10 +63,11 @@ function defaultAvailability() {
 }
 
 export default function Cleaners() {
+  const { addToast } = useToast()
   const [cleaners, setCleaners] = useState<Cleaner[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
 
   const selected = useMemo(() => cleaners.find((c) => c.id === selectedId) || null, [cleaners, selectedId])
 
@@ -103,21 +101,16 @@ export default function Cleaners() {
 
   const fetchCleaners = useCallback(async () => {
     setIsLoading(true)
-    setError(null)
     try {
-      const { data, error: err } = await supabase
-        .from('cleaners')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(500)
+      const { data, error: err } = await supabase.from('cleaners').select('*').order('created_at', { ascending: false }).limit(500)
       if (err) throw err
       setCleaners((data || []) as any)
     } catch (e: any) {
-      setError(e?.message || 'Failed to load cleaners')
+      addToast({ type: 'error', title: 'Failed to load cleaners', message: e?.message })
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [addToast])
 
   useEffect(() => {
     fetchCleaners()
@@ -207,12 +200,11 @@ export default function Cleaners() {
   }
 
   const saveCleaner = async () => {
-    setError(null)
     let rates: any = {}
     try {
       rates = form.ratesText ? JSON.parse(form.ratesText) : {}
     } catch {
-      setError('Rates must be valid JSON (e.g. {"standard":45,"end_of_lease":55})')
+      addToast({ type: 'error', title: 'Invalid rates JSON', message: 'Rates must be valid JSON (e.g. {"standard":45})' })
       return
     }
 
@@ -243,395 +235,405 @@ export default function Cleaners() {
     }
 
     if (!payload.full_name) {
-      setError('Full name is required')
+      addToast({ type: 'warning', title: 'Name required', message: 'Please enter a full name' })
       return
     }
 
+    setSaving(true)
     try {
       if (selectedId) {
         const { error: err } = await supabase.from('cleaners').update(payload).eq('id', selectedId)
         if (err) throw err
+        addToast({ type: 'success', title: '✅ Cleaner updated!' })
       } else {
         const { data, error: err } = await supabase.from('cleaners').insert(payload).select('id').single()
         if (err) throw err
         if (data?.id) setSelectedId(data.id)
+        addToast({ type: 'success', title: '✅ Cleaner added!' })
       }
       await fetchCleaners()
       playSaveSound()
     } catch (e: any) {
-      setError(e?.message || 'Failed to save cleaner')
+      addToast({ type: 'error', title: 'Save failed', message: e?.message })
+    } finally {
+      setSaving(false)
     }
   }
 
   const deleteCleaner = async () => {
     if (!selectedId) return
     if (!confirm('Delete this cleaner?')) return
-    setError(null)
     try {
       const { error: err } = await supabase.from('cleaners').delete().eq('id', selectedId)
       if (err) throw err
+      addToast({ type: 'success', title: 'Cleaner deleted' })
       startNew()
       await fetchCleaners()
     } catch (e: any) {
-      setError(e?.message || 'Failed to delete cleaner')
+      addToast({ type: 'error', title: 'Delete failed', message: e?.message })
     }
   }
 
+  const activeCleaners = cleaners.filter(c => c.active !== false)
+  const inactiveCleaners = cleaners.filter(c => c.active === false)
+
   return (
-    <div className="min-h-screen p-6 md:p-8">
+    <div className="min-h-screen p-6">
       <div className="max-w-7xl mx-auto">
-        <header className="mb-8">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        {/* Header */}
+        <header className="mb-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-white mb-2">Cleaners</h1>
-              <p className="text-[var(--color-text-muted)]">Onboard, update availability, and store rates.</p>
+              <h1 className="text-title text-white flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                </div>
+                Team Management
+              </h1>
+              <p className="text-caption mt-1">Manage your cleaning team's availability, rates, and details</p>
+            </div>
+            <div className="flex items-center gap-4 px-4 py-2 rounded-xl bg-[var(--color-surface)] border border-[var(--glass-border)]">
+              <div className="text-center">
+                <p className="text-2xl font-bold text-white">{activeCleaners.length}</p>
+                <p className="text-[10px] text-[var(--color-text-muted)] uppercase">Active</p>
+              </div>
+              <div className="w-px h-8 bg-[var(--glass-border)]" />
+              <div className="text-center">
+                <p className="text-2xl font-bold text-[var(--color-text-muted)]">{inactiveCleaners.length}</p>
+                <p className="text-[10px] text-[var(--color-text-muted)] uppercase">Inactive</p>
+              </div>
             </div>
           </div>
         </header>
 
-        {error && (
-          <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm">
-            {error}
-          </div>
-        )}
-
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* List */}
-          <div className="rounded-2xl border border-white/10 bg-[var(--color-surface)] overflow-hidden">
-            <div className="p-4 border-b border-white/10 flex items-center justify-between">
-              <div className="text-white font-semibold">All cleaners</div>
-              <button
-                onClick={startNew}
-                className="px-3 py-1.5 text-sm rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white"
-              >
-                + New
-              </button>
+          {/* Cleaners List */}
+          <GlassCard className="overflow-hidden">
+            <div className="p-4 border-b border-[var(--glass-border)] flex items-center justify-between">
+              <h2 className="text-heading text-white">All Cleaners</h2>
+              <Button onClick={startNew} variant="primary" size="sm">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                Add New
+              </Button>
             </div>
 
-            <div className="p-2 max-h-[70vh] overflow-y-auto">
+            <div className="max-h-[calc(100vh-280px)] overflow-y-auto">
               {isLoading ? (
-                <div className="p-3 text-sm text-[var(--color-text-muted)]">Loading…</div>
+                <div className="p-4 space-y-3">
+                  {[1, 2, 3].map(i => <div key={i} className="h-16 rounded-xl shimmer" />)}
+                </div>
               ) : cleaners.length === 0 ? (
-                <div className="p-3 text-sm text-[var(--color-text-muted)]">No cleaners yet.</div>
+                <div className="p-8 text-center">
+                  <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-[var(--color-surface-elevated)] flex items-center justify-center">
+                    <svg className="w-6 h-6 text-[var(--color-text-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  </div>
+                  <p className="text-sm text-[var(--color-text-muted)]">No cleaners yet</p>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-1">Add your first team member</p>
+                </div>
               ) : (
-                cleaners.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => loadIntoForm(c)}
-                    className={`w-full text-left px-3 py-2 rounded-xl border transition-colors ${
-                      selectedId === c.id
-                        ? 'bg-white/10 border-white/20'
-                        : 'bg-transparent border-transparent hover:bg-white/5'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <div className="text-white font-medium">{c.full_name}</div>
-                        <div className="text-xs text-[var(--color-text-muted)]">
-                          {(c.base_location_text || 'No base location') + (c.active === false ? ' • inactive' : '')}
+                <div className="p-2 space-y-1">
+                  {cleaners.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => loadIntoForm(c)}
+                      className={`w-full text-left p-3 rounded-xl border transition-all ${
+                        selectedId === c.id
+                          ? 'bg-[var(--color-accent-muted)] border-[var(--color-accent)]'
+                          : 'bg-transparent border-transparent hover:bg-[var(--color-surface-hover)]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ${
+                          c.active !== false ? 'bg-cyan-500/20 text-cyan-300' : 'bg-gray-500/20 text-gray-400'
+                        }`}>
+                          {c.full_name.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-white font-medium truncate">{c.full_name}</span>
+                            {c.active === false && <Badge variant="default">Inactive</Badge>}
+                          </div>
+                          <p className="text-xs text-[var(--color-text-muted)] truncate">
+                            {c.base_location_text || 'No location set'}
+                          </p>
                         </div>
                       </div>
-                    </div>
-                  </button>
-                ))
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
-          </div>
+          </GlassCard>
 
-          {/* Form */}
-          <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-[var(--color-surface)] p-5">
-            <div className="flex items-center justify-between gap-3 mb-4">
-              <div className="text-white font-semibold">{selected ? 'Edit cleaner' : 'New cleaner'}</div>
-              <div className="flex items-center gap-2">
-                {selectedId && (
-                  <button
-                    onClick={deleteCleaner}
-                    className="px-3 py-2 text-sm rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-200 border border-red-500/20"
-                  >
-                    Delete
-                  </button>
-                )}
-                <button
-                  onClick={saveCleaner}
-                  className="px-4 py-2 text-sm rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white"
-                >
-                  Save
-                </button>
+          {/* Edit Form */}
+          <div className="lg:col-span-2">
+            <GlassCard className="p-5">
+              <div className="flex items-center justify-between gap-4 mb-6">
+                <h2 className="text-heading text-white">
+                  {selected ? 'Edit Cleaner' : 'New Cleaner'}
+                </h2>
+                <div className="flex items-center gap-2">
+                  {selectedId && (
+                    <Button onClick={deleteCleaner} variant="danger" size="sm">
+                      Delete
+                    </Button>
+                  )}
+                  <Button onClick={saveCleaner} loading={saving} variant="primary">
+                    {selectedId ? 'Save Changes' : 'Add Cleaner'}
+                  </Button>
+                </div>
               </div>
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Full name</label>
-                <input
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Basic Info */}
+                <Input
+                  label="Full Name"
                   value={form.full_name}
                   onChange={(e) => setForm((p) => ({ ...p, full_name: e.target.value }))}
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
+                  placeholder="Enter full name"
                 />
-              </div>
-              <div className="flex items-end gap-3">
-                <label className="flex items-center gap-2 text-sm text-white/90">
-                  <input
-                    type="checkbox"
-                    checked={form.active}
-                    onChange={(e) => setForm((p) => ({ ...p, active: e.target.checked }))}
-                  />
-                  Active
-                </label>
-              </div>
+                <div className="flex items-end">
+                  <label className="flex items-center gap-3 p-3 rounded-xl bg-[var(--color-surface-elevated)] border border-[var(--glass-border)] cursor-pointer hover:bg-[var(--color-surface-hover)] transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={form.active}
+                      onChange={(e) => setForm((p) => ({ ...p, active: e.target.checked }))}
+                      className="w-5 h-5 rounded accent-cyan-500"
+                    />
+                    <span className="text-sm text-white">Active</span>
+                  </label>
+                </div>
 
-              <div>
-                <label className="block text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Phone</label>
-                <input
+                <Input
+                  label="Phone"
                   value={form.phone}
                   onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
+                  placeholder="Phone number"
                 />
-              </div>
-              <div>
-                <label className="block text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Email</label>
-                <input
+                <Input
+                  label="Email"
+                  type="email"
                   value={form.email}
                   onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
+                  placeholder="Email address"
                 />
-              </div>
 
-              <div className="md:col-span-2">
-                <label className="block text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">
-                  Base location (suburb/area)
-                </label>
-                <input
-                  value={form.base_location_text}
-                  onChange={(e) => {
-                    // If the user edits the text manually, clear coords so we don't keep stale lat/lng.
-                    setForm((p) => ({ ...p, base_location_text: e.target.value, base_lat: null, base_lng: null }))
-                    handleLocationSearch(e.target.value)
-                  }}
-                  placeholder="Search suburb/area (Mapbox)"
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
-                  onBlur={() => setTimeout(() => setLocationResults([]), 150)}
-                />
-                <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-                  {typeof form.base_lat === 'number' && typeof form.base_lng === 'number'
-                    ? `Pinned: ${form.base_lat.toFixed(5)}, ${form.base_lng.toFixed(5)}`
-                    : 'Not pinned yet — pick a suggestion to save coordinates.'}
+                {/* Location */}
+                <div className="md:col-span-2">
+                  <Input
+                    label="Base Location"
+                    value={form.base_location_text}
+                    onChange={(e) => {
+                      setForm((p) => ({ ...p, base_location_text: e.target.value, base_lat: null, base_lng: null }))
+                      handleLocationSearch(e.target.value)
+                    }}
+                    placeholder="Search suburb/area..."
+                  />
+                  {typeof form.base_lat === 'number' && typeof form.base_lng === 'number' && (
+                    <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                      📍 Pinned: {form.base_lat.toFixed(5)}, {form.base_lng.toFixed(5)}
+                    </p>
+                  )}
+                  {locationResults.length > 0 && (
+                    <div className="mt-2 rounded-xl overflow-hidden border border-[var(--glass-border)] bg-[var(--color-surface)]">
+                      {locationResults.map((r) => (
+                        <button
+                          key={r.place_name}
+                          type="button"
+                          onClick={() => {
+                            setForm((p) => ({
+                              ...p,
+                              base_location_text: r.place_name,
+                              base_lng: r.center?.[0] ?? null,
+                              base_lat: r.center?.[1] ?? null,
+                            }))
+                            setLocationResults([])
+                          }}
+                          className="w-full text-left px-4 py-3 text-sm text-white hover:bg-[var(--color-surface-hover)] border-b border-[var(--glass-border)] last:border-b-0"
+                        >
+                          {r.place_name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {locationResults.length > 0 && (
-                  <div className="mt-2 border border-white/10 rounded-xl bg-black/40 max-h-44 overflow-y-auto text-sm">
-                    {locationResults.map((r) => (
-                      <button
-                        key={r.place_name}
-                        type="button"
-                        onClick={() => {
-                          setForm((p) => ({
-                            ...p,
-                            base_location_text: r.place_name,
-                            base_lng: r.center?.[0] ?? null,
-                            base_lat: r.center?.[1] ?? null,
-                          }))
-                          setLocationResults([])
-                        }}
-                        className="w-full text-left px-3 py-2 hover:bg-white/10 text-white"
-                      >
-                        {r.place_name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
 
-              <div>
-                <label className="block text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">ABN</label>
-                <input
+                <Input
+                  label="ABN"
                   value={form.abn}
                   onChange={(e) => setForm((p) => ({ ...p, abn: e.target.value }))}
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
+                  placeholder="Australian Business Number"
                 />
-              </div>
-              <div>
-                <label className="block text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Team size</label>
-                <input
+                <Input
+                  label="Team Size"
                   type="number"
                   min={1}
                   value={form.team_size}
                   onChange={(e) => setForm((p) => ({ ...p, team_size: Number(e.target.value) }))}
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
                 />
-              </div>
 
-              <div className="md:col-span-2">
-                <label className="block text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Bank details</label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <input
-                    value={form.bank_account_name}
-                    onChange={(e) => setForm((p) => ({ ...p, bank_account_name: e.target.value }))}
-                    placeholder="Account name"
-                    className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
-                  />
-                  <input
-                    value={form.bank_bsb}
-                    onChange={(e) => setForm((p) => ({ ...p, bank_bsb: e.target.value }))}
-                    placeholder="BSB"
-                    className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
-                  />
-                  <input
-                    value={form.bank_account_number}
-                    onChange={(e) => setForm((p) => ({ ...p, bank_account_number: e.target.value }))}
-                    placeholder="Account number"
-                    className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
-                  />
+                {/* Bank Details */}
+                <div className="md:col-span-2">
+                  <label className="text-micro mb-2 block">Bank Details</label>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <input
+                      value={form.bank_account_name}
+                      onChange={(e) => setForm((p) => ({ ...p, bank_account_name: e.target.value }))}
+                      placeholder="Account name"
+                      className="input"
+                    />
+                    <input
+                      value={form.bank_bsb}
+                      onChange={(e) => setForm((p) => ({ ...p, bank_bsb: e.target.value }))}
+                      placeholder="BSB"
+                      className="input"
+                    />
+                    <input
+                      value={form.bank_account_number}
+                      onChange={(e) => setForm((p) => ({ ...p, bank_account_number: e.target.value }))}
+                      placeholder="Account number"
+                      className="input"
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Min booking (minutes)</label>
-                <input
+                <Input
+                  label="Min Booking (minutes)"
                   type="number"
                   min={30}
                   step={30}
                   value={form.min_booking_minutes}
                   onChange={(e) => setForm((p) => ({ ...p, min_booking_minutes: Number(e.target.value) }))}
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
                 />
-              </div>
-              <div>
-                <label className="block text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Notice required (hours)</label>
-                <input
+                <Input
+                  label="Notice Required (hours)"
                   type="number"
                   min={0}
-                  step={1}
                   value={form.notice_hours}
                   onChange={(e) => setForm((p) => ({ ...p, notice_hours: Number(e.target.value) }))}
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
                 />
-              </div>
 
-              <div className="md:col-span-2">
-                <label className="block text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">
-                  Rates (JSON)
-                </label>
-                <textarea
-                  value={form.ratesText}
-                  onChange={(e) => setForm((p) => ({ ...p, ratesText: e.target.value }))}
-                  rows={2}
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white font-mono"
-                />
-              </div>
+                {/* Rates */}
+                <div className="md:col-span-2">
+                  <label className="text-micro mb-2 block">Rates (JSON)</label>
+                  <textarea
+                    value={form.ratesText}
+                    onChange={(e) => setForm((p) => ({ ...p, ratesText: e.target.value }))}
+                    rows={2}
+                    className="input w-full font-mono text-sm"
+                    placeholder='{"standard": 45, "end_of_lease": 55}'
+                  />
+                </div>
 
-              <div className="md:col-span-2">
-                <label className="block text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Availability</label>
-                <div className="border border-white/10 rounded-2xl overflow-hidden">
-                  <div className="grid grid-cols-5 gap-0 bg-white/5 border-b border-white/10">
-                    <div className="p-2 text-xs text-[var(--color-text-muted)]">Day</div>
-                    {BUCKETS.map((b) => (
-                      <div key={b} className="p-2 text-xs text-[var(--color-text-muted)] text-center">
-                        {b}
+                {/* Availability Matrix */}
+                <div className="md:col-span-2">
+                  <label className="text-micro mb-3 block">Availability</label>
+                  <div className="rounded-2xl overflow-hidden border border-[var(--glass-border)]">
+                    <div className="grid grid-cols-5 gap-0 bg-[var(--color-surface-elevated)]">
+                      <div className="p-3 text-xs text-[var(--color-text-muted)]">Day</div>
+                      {BUCKETS.map((b) => (
+                        <div key={b} className="p-3 text-xs text-[var(--color-text-muted)] text-center">{b}</div>
+                      ))}
+                    </div>
+                    {DAYS.map((d) => (
+                      <div key={d} className="grid grid-cols-5 gap-0 border-t border-[var(--glass-border)]">
+                        <div className="p-3 text-sm text-white/90">{d.slice(0, 3)}</div>
+                        {BUCKETS.map((b) => (
+                          <button
+                            key={b}
+                            type="button"
+                            onClick={() => toggleAvailability(d, b)}
+                            className={`p-3 text-center transition-all ${
+                              form.availability?.[d]?.[b]
+                                ? 'bg-cyan-500/30 text-cyan-200 font-medium'
+                                : 'bg-transparent text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]'
+                            }`}
+                          >
+                            {form.availability?.[d]?.[b] ? '✓' : '—'}
+                          </button>
+                        ))}
                       </div>
                     ))}
                   </div>
-                  {DAYS.map((d) => (
-                    <div key={d} className="grid grid-cols-5 gap-0 border-b border-white/10 last:border-b-0">
-                      <div className="p-2 text-sm text-white/90">{d}</div>
-                      {BUCKETS.map((b) => (
-                        <button
-                          key={b}
-                          type="button"
-                          onClick={() => toggleAvailability(d, b)}
-                          className={`p-2 text-xs text-center transition-colors ${
-                            form.availability?.[d]?.[b] ? 'bg-cyan-500/25 text-cyan-200' : 'bg-transparent text-white/60 hover:bg-white/5'
-                          }`}
-                        >
-                          {form.availability?.[d]?.[b] ? 'Yes' : '—'}
-                        </button>
-                      ))}
-                    </div>
-                  ))}
                 </div>
-              </div>
 
-              <div className="md:col-span-2">
-                <label className="block text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">
-                  Transport & travel
-                </label>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                  <label className="flex items-center gap-2 text-sm text-white/90">
+                {/* Transport */}
+                <div className="md:col-span-2">
+                  <label className="text-micro mb-3 block">Transport & Travel</label>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <label className="flex items-center gap-2 p-3 rounded-xl bg-[var(--color-surface-elevated)] border border-[var(--glass-border)] cursor-pointer hover:bg-[var(--color-surface-hover)]">
+                      <input
+                        type="checkbox"
+                        checked={form.has_transport}
+                        onChange={(e) => setForm((p) => ({ ...p, has_transport: e.target.checked }))}
+                        className="accent-cyan-500"
+                      />
+                      <span className="text-sm text-white">Has transport</span>
+                    </label>
+                    <select
+                      value={form.transport_type}
+                      onChange={(e) => setForm((p) => ({ ...p, transport_type: e.target.value }))}
+                      className="input"
+                    >
+                      <option value="car">Car</option>
+                      <option value="public_transport">Public Transport</option>
+                      <option value="bike">Bike</option>
+                      <option value="other">Other</option>
+                    </select>
                     <input
-                      type="checkbox"
-                      checked={form.has_transport}
-                      onChange={(e) => setForm((p) => ({ ...p, has_transport: e.target.checked }))}
+                      type="number"
+                      min={0}
+                      value={form.max_travel_km}
+                      onChange={(e) => setForm((p) => ({ ...p, max_travel_km: Number(e.target.value) }))}
+                      className="input"
+                      placeholder="Max km"
                     />
-                    Has transport
-                  </label>
-                  <select
-                    value={form.transport_type}
-                    onChange={(e) => setForm((p) => ({ ...p, transport_type: e.target.value }))}
-                    className="rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
-                  >
-                    <option value="car">car</option>
-                    <option value="public_transport">public transport</option>
-                    <option value="bike">bike</option>
-                    <option value="other">other</option>
-                  </select>
-                  <input
-                    type="number"
-                    min={0}
-                    value={form.max_travel_km}
-                    onChange={(e) => setForm((p) => ({ ...p, max_travel_km: Number(e.target.value) }))}
-                    className="rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
-                    placeholder="Max km"
-                  />
-                  <label className="flex items-center gap-2 text-sm text-white/90">
-                    <input
-                      type="checkbox"
-                      checked={form.can_transport_equipment}
-                      onChange={(e) => setForm((p) => ({ ...p, can_transport_equipment: e.target.checked }))}
-                    />
-                    Can carry equipment
-                  </label>
+                    <label className="flex items-center gap-2 p-3 rounded-xl bg-[var(--color-surface-elevated)] border border-[var(--glass-border)] cursor-pointer hover:bg-[var(--color-surface-hover)]">
+                      <input
+                        type="checkbox"
+                        checked={form.can_transport_equipment}
+                        onChange={(e) => setForm((p) => ({ ...p, can_transport_equipment: e.target.checked }))}
+                        className="accent-cyan-500"
+                      />
+                      <span className="text-sm text-white">Can carry equipment</span>
+                    </label>
+                  </div>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Public liability policy #</label>
-                <input
+                <Input
+                  label="Public Liability Policy #"
                   value={form.public_liability_policy_number}
                   onChange={(e) => setForm((p) => ({ ...p, public_liability_policy_number: e.target.value }))}
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
+                  placeholder="Policy number"
                 />
-              </div>
-              <div>
-                <label className="block text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Policy expiry</label>
-                <input
+                <Input
+                  label="Policy Expiry"
                   type="date"
                   value={form.public_liability_expiry}
                   onChange={(e) => setForm((p) => ({ ...p, public_liability_expiry: e.target.value }))}
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
                 />
-              </div>
 
-              <div className="md:col-span-2">
-                <label className="block text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">
-                  Cancellation policy
-                </label>
-                <textarea
-                  value={form.cancellation_policy}
-                  onChange={(e) => setForm((p) => ({ ...p, cancellation_policy: e.target.value }))}
-                  rows={2}
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm text-white"
-                />
+                <div className="md:col-span-2">
+                  <label className="text-micro mb-2 block">Cancellation Policy</label>
+                  <textarea
+                    value={form.cancellation_policy}
+                    onChange={(e) => setForm((p) => ({ ...p, cancellation_policy: e.target.value }))}
+                    rows={2}
+                    className="input w-full"
+                    placeholder="Cancellation policy notes..."
+                  />
+                </div>
               </div>
-            </div>
-
-            <div className="mt-4 text-xs text-[var(--color-text-muted)]">
-              Note: this “simple mode” stores bank details in the DB like the rest of the app. If you ever expose this beyond internal
-              use, we should lock this down with auth/RLS or move payouts behind an Edge Function.
-            </div>
+            </GlassCard>
           </div>
         </div>
       </div>
     </div>
   )
 }
-
-

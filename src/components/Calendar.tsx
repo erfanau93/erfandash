@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase'
 import { playSaveSound } from '../lib/sounds'
 import { format } from 'date-fns'
 import { fetchMapboxToken } from '../lib/mapbox'
+import { GlassCard, Button, Badge, Skeleton } from './ui'
 
 type Cleaner = {
   id: string
@@ -283,11 +284,11 @@ function EventDetailModal({
 
   return createPortal(
     <div 
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[10000] p-4"
+      className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[10000] p-4 animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div 
-        className="bg-[#1a1d24] border border-white/10 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl"
+        className="glass-card w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95 slide-in-from-bottom-4 duration-300"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -304,27 +305,27 @@ function EventDetailModal({
             </div>
             <div className="flex items-center gap-2">
               {lead?.id && (
-                <button
-                  type="button"
+                <Button
+                  variant="danger"
+                  size="sm"
                   onClick={() => onDeleteLead(lead.id)}
                   disabled={deletingLeadId === lead.id}
-                  className="px-3 py-2 text-xs rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/30 disabled:opacity-50"
                 >
                   Remove lead
-                </button>
+                </Button>
               )}
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() =>
                   window.dispatchEvent(new CustomEvent('open-job-modal', { detail: { occurrenceId: occurrence.id } }))
                 }
-                className="px-3 py-2 text-xs rounded-lg bg-white/5 hover:bg-white/10 text-white border border-white/10"
               >
                 Job details
-              </button>
+              </Button>
               <button
                 onClick={onClose}
-                className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors"
+                className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all hover:scale-110"
               >
                 <svg
                   className="w-5 h-5 text-gray-400"
@@ -376,15 +377,15 @@ function EventDetailModal({
                 {quoteLoading ? <div className="text-xs text-[var(--color-text-muted)] mt-1">Loading quote…</div> : null}
                 {quoteError ? <div className="text-xs text-red-300 mt-1">{quoteError}</div> : null}
               </div>
-              <button
-                type="button"
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={() =>
                   window.dispatchEvent(new CustomEvent('open-job-modal', { detail: { occurrenceId: occurrence.id } }))
                 }
-                className="px-3 py-2 text-xs rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white"
               >
                 Open quote
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -536,13 +537,14 @@ function EventDetailModal({
                     />
                   </div>
                 </div>
-                <button
+                <Button
                   onClick={handleReschedule}
                   disabled={isUpdating}
-                  className="w-full px-4 py-2 text-sm rounded-lg bg-cyan-500 hover:bg-cyan-400 text-white font-medium transition-colors disabled:opacity-50"
+                  variant="primary"
+                  className="w-full"
                 >
                   {isUpdating ? 'Moving...' : 'Move to new time'}
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -978,46 +980,59 @@ export default function Calendar() {
   }, [fetchBookings, dateRange])
 
   return (
-    <div className="min-h-screen p-6 md:p-8">
+    <div className="min-h-screen p-4 md:p-6 lg:p-8">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <header className="mb-8">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-3">
-                <svg className="w-9 h-9 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-                </svg>
+              <h1 className="text-3xl font-bold text-white flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500/30 to-blue-500/30 border border-cyan-400/30 flex items-center justify-center backdrop-blur-sm">
+                  <svg className="w-6 h-6 text-cyan-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                  </svg>
+                </div>
                 Booking Calendar
               </h1>
-              <p className="text-[var(--color-text-muted)]">
-                Manage all your scheduled jobs
+              <p className="text-[var(--color-text-muted)] mt-2 text-sm">
+                Manage all your scheduled jobs and bookings
               </p>
             </div>
 
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={() => calendarRef.current?.getApi().today()}
+                variant="secondary"
+                size="sm"
+              >
+                Today
+              </Button>
+            </div>
           </div>
         </header>
 
         {/* Legend */}
-        <div className="mb-6 flex flex-wrap items-center gap-4">
-          <span className="text-sm text-gray-400">Status:</span>
-          {Object.entries(STATUS_COLORS).map(([status, colors]) => (
-            <div key={status} className="flex items-center gap-2">
+        <GlassCard className="mb-6 p-4">
+          <div className="flex flex-wrap items-center gap-6">
+            <span className="text-sm text-[var(--color-text-muted)] font-medium">Status:</span>
+            {Object.entries(STATUS_COLORS).map(([status, colors]) => (
+              <div key={status} className="flex items-center gap-2 group cursor-default">
+                <div
+                  className="w-3 h-3 rounded-full ring-2 ring-white/10 group-hover:ring-white/30 transition-all group-hover:scale-110"
+                  style={{ backgroundColor: colors.bg }}
+                />
+                <span className="text-sm text-[var(--color-text-secondary)] capitalize group-hover:text-white transition-colors">{status}</span>
+              </div>
+            ))}
+            <div className="flex items-center gap-2 group cursor-default">
               <div
-                className="w-3 h-3 rounded"
-                style={{ backgroundColor: colors.bg }}
+                className="w-3 h-3 rounded-full ring-2 ring-white/10 group-hover:ring-white/30 transition-all group-hover:scale-110"
+                style={{ backgroundColor: ASSIGNED_SCHEDULED_COLORS.bg }}
               />
-              <span className="text-sm text-gray-300 capitalize">{status}</span>
+              <span className="text-sm text-[var(--color-text-secondary)] group-hover:text-white transition-colors">assigned</span>
             </div>
-          ))}
-          <div className="flex items-center gap-2">
-            <div
-              className="w-3 h-3 rounded"
-              style={{ backgroundColor: ASSIGNED_SCHEDULED_COLORS.bg }}
-            />
-            <span className="text-sm text-gray-300">assigned</span>
           </div>
-        </div>
+        </GlassCard>
 
         {actionError ? (
           <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm">
@@ -1026,19 +1041,25 @@ export default function Calendar() {
         ) : null}
 
         {/* Calendar */}
-        <div className="glass-card rounded-2xl p-4 md:p-6 overflow-hidden">
+        <GlassCard className="p-4 md:p-6 overflow-hidden">
           {fetchError ? (
-            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm">
+            <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-sm flex items-center gap-3">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
               Failed to load calendar: {fetchError}
             </div>
           ) : isLoading && events.length === 0 ? (
             <div className="h-[700px] flex items-center justify-center">
-              <div className="flex flex-col items-center gap-3">
-                <svg className="w-8 h-8 animate-spin text-cyan-400" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                <p className="text-gray-400">Loading calendar...</p>
+              <div className="flex flex-col items-center gap-4">
+                <div className="relative">
+                  <div className="w-16 h-16 rounded-2xl bg-cyan-500/20 animate-pulse" />
+                  <svg className="w-8 h-8 text-cyan-400 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                </div>
+                <p className="text-[var(--color-text-muted)]">Loading calendar...</p>
               </div>
             </div>
           ) : (
@@ -1094,22 +1115,38 @@ export default function Calendar() {
               />
             </div>
           )}
-        </div>
+        </GlassCard>
 
         {/* Stats */}
         <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
           {['scheduled', 'completed', 'skipped', 'cancelled'].map((status) => {
             const count = events.filter(e => e.extendedProps.occurrence.status === status).length
             const colors = STATUS_COLORS[status]
+            const iconMap: Record<string, React.ReactNode> = {
+              scheduled: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+              completed: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+              skipped: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 4.5l7.5 7.5-7.5 7.5m-6-15l7.5 7.5-7.5 7.5" /></svg>,
+              cancelled: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
+            }
             return (
-              <div 
+              <GlassCard
                 key={status}
-                className="glass-card rounded-xl p-4 border-l-4"
-                style={{ borderLeftColor: colors.bg }}
+                className="p-4 group hover:scale-[1.02] transition-all duration-300 cursor-default"
+                style={{ borderLeft: `4px solid ${colors.bg}` }}
               >
-                <p className="text-2xl font-bold text-white">{count}</p>
-                <p className="text-sm text-gray-400 capitalize">{status}</p>
-              </div>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-3xl font-bold text-white tabular-nums group-hover:scale-105 transition-transform origin-left">{count}</p>
+                    <p className="text-sm text-[var(--color-text-muted)] capitalize mt-1">{status}</p>
+                  </div>
+                  <div 
+                    className="w-10 h-10 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110"
+                    style={{ backgroundColor: `${colors.bg}20`, color: colors.bg }}
+                  >
+                    {iconMap[status]}
+                  </div>
+                </div>
+              </GlassCard>
             )
           })}
         </div>
@@ -1137,25 +1174,31 @@ export default function Calendar() {
       {reviewTarget &&
         createPortal(
           <div
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[10001] p-4"
+            className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[10001] p-4 animate-in fade-in duration-200"
             onClick={() => setReviewTarget(null)}
           >
             <div
-              className="bg-[#1a1d24] border border-white/10 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl"
+              className="glass-card w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95 slide-in-from-bottom-4 duration-300"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="p-5 border-b border-white/10 bg-gradient-to-r from-emerald-500/10 to-cyan-500/10">
                 <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-white font-semibold text-lg">Review cleaner</h3>
-                    <p className="text-sm text-[var(--color-text-muted)] mt-1">
-                      {reviewTarget.cleanerName} • {reviewTarget.leadName} •{' '}
-                      {format(new Date(reviewTarget.startAt), 'EEE, MMM d')}
-                    </p>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center">
+                      <svg className="w-5 h-5 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <h3 className="text-white font-semibold text-lg">Review cleaner</h3>
+                      <p className="text-sm text-[var(--color-text-muted)] mt-0.5">
+                        {reviewTarget.cleanerName} • {format(new Date(reviewTarget.startAt), 'EEE, MMM d')}
+                      </p>
+                    </div>
                   </div>
                   <button
                     onClick={() => setReviewTarget(null)}
-                    className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors"
+                    className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all hover:scale-110"
                   >
                     <svg
                       className="w-5 h-5 text-gray-400"
@@ -1172,58 +1215,71 @@ export default function Calendar() {
 
               <div className="p-5 space-y-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">Rating</label>
+                  <label className="block text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-3">Rating</label>
                   <div className="flex gap-2">
                     {[1, 2, 3, 4, 5].map((n) => (
                       <button
                         key={n}
                         onClick={() => setReviewRating(n)}
                         type="button"
-                        className={`px-3 py-2 rounded-lg border text-sm transition-colors ${
+                        className={`flex-1 py-3 rounded-xl border text-sm font-medium transition-all ${
                           reviewRating === n
-                            ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-200'
-                            : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10'
+                            ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-200 scale-105'
+                            : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10 hover:scale-105'
                         }`}
                       >
-                        {n}
+                        {n} ⭐
                       </button>
                     ))}
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">Notes</label>
+                  <label className="block text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Notes</label>
                   <textarea
                     value={reviewNotes}
                     onChange={(e) => setReviewNotes(e.target.value)}
                     rows={3}
-                    className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                    className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/40 transition-all placeholder:text-[var(--color-text-muted)]"
                     placeholder="Anything to note about this clean?"
                   />
                 </div>
 
                 {reviewError && (
-                  <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm">
+                  <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-sm flex items-center gap-2">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
                     {reviewError}
                   </div>
                 )}
               </div>
 
               <div className="p-5 border-t border-white/10 bg-white/[0.02] flex items-center justify-between gap-3">
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
                   onClick={() => setReviewTarget(null)}
-                  className="px-4 py-2.5 text-sm rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/10 transition-colors"
                 >
                   Skip
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  variant="primary"
                   onClick={submitReview}
                   disabled={savingReview}
-                  className="px-5 py-2.5 text-sm rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-white font-medium shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50"
+                  icon={
+                    savingReview ? (
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    )
+                  }
                 >
                   {savingReview ? 'Saving…' : 'Save review'}
-                </button>
+                </Button>
               </div>
             </div>
           </div>,

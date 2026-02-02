@@ -9,7 +9,7 @@ import { supabase } from '../lib/supabase'
 import { playSaveSound } from '../lib/sounds'
 import { format } from 'date-fns'
 import { fetchMapboxToken } from '../lib/mapbox'
-import { GlassCard, Button, Badge, Skeleton } from './ui'
+import { GlassCard, Button } from './ui'
 
 type Cleaner = {
   id: string

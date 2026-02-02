@@ -1341,7 +1341,7 @@ export default function Dispatch() {
                   <div>
                     <div className="text-white font-semibold">
                       Unassigned jobs{' '}
-                      <Badge variant="warning" size="sm">{sortedUnassigned.length}</Badge>
+                      <Badge variant="warning">{sortedUnassigned.length}</Badge>
                     </div>
                     <div className="text-xs text-[var(--color-text-muted)]">Click a job for full details</div>
                   </div>
@@ -1505,7 +1505,7 @@ export default function Dispatch() {
                     </svg>
                   </div>
                   <div className="text-white font-semibold">
-                    Assigned jobs <Badge variant="success" size="sm">{sortedAssigned.length}</Badge>
+                    Assigned jobs <Badge variant="success">{sortedAssigned.length}</Badge>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-white/80">

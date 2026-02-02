@@ -9,7 +9,7 @@
  * - Everything responds
  */
 
-import { createContext, useContext, useState, useEffect, useCallback, forwardRef, type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, forwardRef, type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 
 // =============================================================================
@@ -22,9 +22,17 @@ interface GlassCardProps {
   hover?: boolean
   onClick?: () => void
   variant?: 'default' | 'elevated' | 'interactive'
+  style?: CSSProperties
 }
 
-export function GlassCard({ children, className = '', hover = true, onClick, variant = 'default' }: GlassCardProps) {
+export function GlassCard({
+  children,
+  className = '',
+  hover = true,
+  onClick,
+  variant = 'default',
+  style,
+}: GlassCardProps) {
   const variants = {
     default: 'glass-card',
     elevated: 'glass-elevated',
@@ -37,6 +45,7 @@ export function GlassCard({ children, className = '', hover = true, onClick, var
       onClick={onClick}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
+      style={style}
     >
       {children}
     </div>

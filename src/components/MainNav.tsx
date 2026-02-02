@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useState, useCallback } from 'react'
-import { LiveIndicator, Kbd, Badge } from './ui'
+import { LiveIndicator, Kbd } from './ui'
 
 const NAV_ITEMS = [
   { 

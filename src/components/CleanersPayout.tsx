@@ -682,8 +682,8 @@ export default function CleanersPayout() {
               <div>
                 <p className="text-sm text-[var(--color-text-muted)]">Status</p>
                 <div className="flex items-center gap-2 mt-1">
-                  <Badge variant="success" size="sm">{totals.paidCount} paid</Badge>
-                  <Badge variant="warning" size="sm">{totals.unpaidCount} unpaid</Badge>
+                  <Badge variant="success">{totals.paidCount} paid</Badge>
+                  <Badge variant="warning">{totals.unpaidCount} unpaid</Badge>
                 </div>
               </div>
               <div className="w-10 h-10 rounded-xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center">
@@ -767,9 +767,9 @@ export default function CleanersPayout() {
               <div className="p-3 rounded-xl bg-white/5 border border-white/10">
                 <p className="text-xs text-[var(--color-text-muted)]">Status</p>
                 <div className="flex items-center gap-2 mt-1">
-                  <Badge variant="success" size="sm">{totals.paidCount}</Badge>
+                  <Badge variant="success">{totals.paidCount}</Badge>
                   <span className="text-[var(--color-text-muted)]">/</span>
-                  <Badge variant="warning" size="sm">{totals.unpaidCount}</Badge>
+                  <Badge variant="warning">{totals.unpaidCount}</Badge>
                 </div>
               </div>
             </div>

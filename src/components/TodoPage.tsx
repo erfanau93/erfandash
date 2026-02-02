@@ -47,12 +47,6 @@ const dialpadUserId = '6452247499866112'
 const dialpadUrl = `https://dialpad.com/api/v2/users/${dialpadUserId}/initiate_call`
 const dialpadToken = 'NNRYnLXqJgkWXePcCG2SGCVzHfuB6kxAqQATPvnmn3x6k5RevHUCPdF8zF8jqXsssuyG67bEALxZH9TACsq4aARA46VL4yZ246Kf'
 
-const formatDateTime = (value?: string | number | null) => {
-  if (!value) return null
-  const d = typeof value === 'number' ? new Date(value) : new Date(value)
-  return Number.isNaN(d.getTime()) ? null : format(d, 'EEE, MMM d • h:mm a')
-}
-
 const ENCOURAGEMENTS = [
   "You cleared today's schedule — nice.",
   "Great work! You're on a roll.",
@@ -67,7 +61,6 @@ export default function TodoPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [todosTableUnavailable, setTodosTableUnavailable] = useState(false)
   const [callingLeadId, setCallingLeadId] = useState<string | null>(null)
-  const [lastCallsByLead, setLastCallsByLead] = useState<Record<string, string | null>>({})
   const [leadsWithoutStatus, setLeadsWithoutStatus] = useState<Lead[]>([])
   const [unassignedJobs, setUnassignedJobs] = useState<JobOccurrence[]>([])
   const [overdueUnmarkedJobs, setOverdueUnmarkedJobs] = useState<JobOccurrence[]>([])
@@ -93,21 +86,6 @@ export default function TodoPage() {
     try { localStorage.setItem('todo-dismissed', JSON.stringify(dismissed)) } catch {}
   }, [])
 
-  const loadLastCalls = useCallback(async (leads: Lead[]) => {
-    try {
-      const phoneNumbers = Array.from(new Set(leads.map((l) => l.phone_number).filter(Boolean))) as string[]
-      if (!phoneNumbers.length) return
-      const callsMap: Record<string, string | null> = {}
-      await Promise.all(phoneNumbers.map(async (phone) => {
-        const { data: calls } = await supabase.from('dialpad_calls').select('created_at').or(`external_number.eq.${phone},external_number.eq.+${phone}`).order('created_at', { ascending: false }).limit(1)
-        if (calls?.[0]) callsMap[phone] = calls[0].created_at
-      }))
-      const lastCallsByLeadId: Record<string, string | null> = {}
-      leads.forEach((lead) => { if (lead.phone_number && callsMap[lead.phone_number]) lastCallsByLeadId[lead.id] = callsMap[lead.phone_number] })
-      setLastCallsByLead((prev) => ({ ...prev, ...lastCallsByLeadId }))
-    } catch (err) { console.error('Failed to load last calls', err) }
-  }, [])
-
   const fetchData = useCallback(async () => {
     setIsLoading(true)
     try {
@@ -119,8 +97,6 @@ export default function TodoPage() {
       const { data: leads } = await supabase.from('extracted_leads').select('id, name, phone_number, status, created_at, last_text_date, last_text_body').order('created_at', { ascending: false }).limit(1000)
       const leadsNoStatus = (leads || []).filter((l: any) => !l.status || l.status === '')
       setLeadsWithoutStatus(leadsNoStatus)
-      await loadLastCalls(leadsNoStatus)
-
       // Unassigned jobs
       const { data: unassignedData } = await supabase.from('booking_occurrences').select(`id, series_id, quote_id, start_at, end_at, status, cleaner_id, series:booking_series(title, lead:extracted_leads(name), quote_id)`).gte('start_at', today.toISOString()).lt('start_at', fiveDaysFromNow.toISOString()).is('cleaner_id', null).neq('status', 'cancelled').order('start_at', { ascending: true })
       setUnassignedJobs((unassignedData || []) as any)
@@ -163,7 +139,7 @@ export default function TodoPage() {
     } catch (err: any) {
       addToast({ type: 'error', title: 'Failed to load', message: err?.message })
     } finally { setIsLoading(false) }
-  }, [today, weekStart, weekEnd, loadLastCalls, addToast])
+  }, [today, weekStart, weekEnd, addToast])
 
   useEffect(() => { fetchData() }, [fetchData])
 

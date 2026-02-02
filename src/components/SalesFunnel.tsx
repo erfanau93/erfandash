@@ -7,7 +7,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { GlassCard, Button, Badge, useToast } from './ui'
+import { Button, useToast } from './ui'
 import SmsLead from './SmsLead'
 import QuoteTool from './QuoteTool'
 import BookingModal from './BookingModal'

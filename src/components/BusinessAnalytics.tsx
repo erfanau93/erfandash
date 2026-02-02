@@ -233,7 +233,7 @@ function MetricCardLarge({
           <p className="text-sm text-[var(--color-text-secondary)] font-medium">{title}</p>
         </div>
         {growth && growth.label !== 'N/A' && (
-          <Badge variant={growth.isUp ? 'success' : 'danger'} size="sm">
+          <Badge variant={growth.isUp ? 'success' : 'error'} className="text-[10px]">
             {growth.isUp ? '↑' : '↓'} {growth.label}
           </Badge>
         )}
@@ -268,7 +268,7 @@ function FunnelChart({
               <div className="flex items-center gap-3">
                 <span className="text-xl font-bold text-white tabular-nums">{formatNumber(stage.value)}</span>
                 {stage.rate && (
-                  <Badge variant="default" size="sm">{stage.rate}</Badge>
+                  <Badge variant="default" className="text-[10px]">{stage.rate}</Badge>
                 )}
               </div>
             </div>

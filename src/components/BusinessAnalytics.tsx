@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
-import { GlassCard, Button, Skeleton, Badge, ProgressRing } from './ui'
+import { GlassCard, Button, Skeleton, Badge } from './ui'
 import {
   startOfMonth,
   endOfMonth,

@@ -66,6 +66,7 @@ export default function TodoPage() {
   const [overdueUnmarkedJobs, setOverdueUnmarkedJobs] = useState<JobOccurrence[]>([])
   const [pastDueUnpaidJobs, setPastDueUnpaidJobs] = useState<JobOccurrence[]>([])
   const [unpaidCleanerPayouts, setUnpaidCleanerPayouts] = useState<CleanerPayout[]>([])
+  const [lastCallsByLead, setLastCallsByLead] = useState<Record<string, string>>({})
   const [dismissedItems, setDismissedItems] = useState<Record<string, boolean>>(() => {
     try { return JSON.parse(localStorage.getItem('todo-dismissed') || '{}') } catch { return {} }
   })

@@ -6,11 +6,8 @@ import {
   endOfMonth,
   subMonths,
   format,
-  eachDayOfInterval,
   differenceInDays,
   parseISO,
-  startOfDay,
-  endOfDay,
 } from 'date-fns'
 
 type QuoteRecord = {
@@ -1037,7 +1034,7 @@ export default function BusinessAnalytics() {
                 </tr>
               </thead>
               <tbody>
-                {projections.map((proj, i) => (
+                {projections.map((proj) => (
                   <tr
                     key={proj.label}
                     className={`border-b border-white/5 transition-colors hover:bg-white/5 ${proj.label === 'Current' ? 'bg-indigo-500/10' : ''}`}
